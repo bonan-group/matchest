@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "matchest"
+dynamic = ["version"]
+description = 'Collection of script and tools for materials science'
+readme = "README.md"
+requires-python = ">=3.8"
+license = "MIT"
+keywords = []
+authors = [
+  { name = "Bonan Zhu", email = "zhubonan@outlook.com" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = [
+  "spglib",
+  "ase",
+]
+
+[project.urls]
+Documentation = "https://github.com/bonan-group/matchest#readme"
+Issues = "https://github.com/bonan-group/matchest/issues"
+Source = "https://github.com/bonan-group/matchest"
+
+[project.scripts]
+matc = "matchest.cli.main:mc"
+
+[tool.hatch.version]
+path = "src/matchest/__about__.py"
+
+[tool.hatch.envs.types]
+extra-dependencies = [
+  "mypy>=1.0.0",
+]
+[tool.hatch.envs.types.scripts]
+check = "mypy --install-types --non-interactive {args:src/matchest tests}"
+
+[tool.coverage.run]
+source_pkgs = ["matchest", "tests"]
+branch = true
+parallel = true
+omit = [
+  "src/matchest/__about__.py",
+]
+
+[tool.coverage.paths]
+matchest = ["src/matchest", "*/matchest/src/matchest"]
+tests = ["tests", "*/matchest/tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
