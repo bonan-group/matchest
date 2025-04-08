@@ -27,6 +27,7 @@ classifiers = [
 dependencies = [
   "spglib",
   "ase",
+  "pymatgen"
 ]
 
 [project.urls]
