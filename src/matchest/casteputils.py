@@ -1,8 +1,6 @@
 """
-Utility module for analysising CASTEP data
+Utility module for analysing CASTEP data
 """
-
-# TODO Construct persistent mapping from atoms to castep for better efficiency
 import numpy as np
 
 

@@ -54,8 +54,9 @@ def kpoints(filename, file_type, l_min, l_max, comma_sep, vasp, realspace):
     kpoints_main(filename, file_type, l_min, l_max, comma_sep, vasp, realspace)
 
 @mc.command('vasp-conv') 
-@click.argument('filename')
+@click.argument('filename', default='OUTCAR')
 def vasp_conv(filename):
+    """Convergence analysis for VASP"""
     
     from .geomconv import print_vasp_conv
     print_vasp_conv(filename)
@@ -173,7 +174,7 @@ def trim_tags(input_file, tag_to_remove):
 
     return
 
-@mc.main.command('castep-scf-info',
+@mc.command('castep-scf-info',
               help='Print number of SCF steps per iteration')
 @click.argument('dot-castep', type=click.File('r'))
 def castep_scf_info(dot_castep):
