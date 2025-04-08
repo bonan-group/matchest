@@ -52,3 +52,10 @@ def kpoints(filename, file_type, l_min, l_max, comma_sep, vasp, realspace):
     """Calculate a systematic series of k-point samples."""
     from .kpoints import kpoints_main
     kpoints_main(filename, file_type, l_min, l_max, comma_sep, vasp, realspace)
+
+@mc.command() 
+@click.argument('filename')
+def conv(filename):
+    
+    from .geomconv import print_vasp_conv
+    print_vasp_conv(filename)
