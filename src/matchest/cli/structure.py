@@ -4,7 +4,6 @@ import ase.io
 import spglib
 from typing import Optional
 
-from .main import mc
 
 
 def get_primitive_atoms(

@@ -24,7 +24,6 @@ def ase_to_castep_index(atoms, indices):
     return list of (element, i in the same element)"""
     if isinstance(indices, int):
         indices = [indices]
-    num = atoms.numbers
     symbols = np.array(atoms.get_chemical_symbols())
     iatoms = np.arange(len(atoms))
     res = []
@@ -48,7 +47,7 @@ def generate_ionic_fix_cons(atoms, indices, mask=None):
     castep_indices = ase_to_castep_index(atoms, indices)
     count = 1
     lines = []
-    if mask == None:
+    if mask is None:
         mask = (1, 1, 1)
     for symbol, i in castep_indices:
         if mask[0]:
@@ -113,7 +112,7 @@ def take_popn(seed):
                     record.seek(0)
                     popns.append(record)
                 else:
-                    record.write(unicode(line))
+                    record.write(line)
 
     return popns
 

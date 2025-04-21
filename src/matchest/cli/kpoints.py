@@ -17,7 +17,6 @@ from typing import Optional
 import ase.io
 from typing import List, Tuple
 
-import numpy as np
 
 def calc_kpt_tuple_naive(atoms, cutoff_length=10, rounding='up'):
     """Calculate k-point grid using real-space lattice vectors"""
