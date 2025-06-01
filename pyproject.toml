@@ -71,3 +71,11 @@ exclude_lines = [
  
 [tool.hatch.envs.hatch-static-analysis]
 config-path = "ruff_defaults.toml"
+
+[tool.ruff.format]
+preview = false
+quote-style = "double"
+
+[tool.ruff.lint]
+preview = false
+extend-select = []
