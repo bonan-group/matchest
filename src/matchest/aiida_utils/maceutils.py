@@ -1,3 +1,6 @@
+"""
+Utilities for using MACE with aiida-vasp
+"""
 from aiida.engine.processes import calcfunction
 import aiida.orm as orm
 from ase.build import sort, make_supercell
