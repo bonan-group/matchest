@@ -300,9 +300,11 @@ def compute_li_voltage(
     nli = li_comp.num_atoms
     # Normalise to one Li in the product, hence the reaction energy is the voltage
     reaction.normalize_to(li_comp, factor=1 / nli)
-    eng = reaction.calculate_energy(
-        {lith_comp: lith_eng, deli_comp: deli_eng, li_comp: li_eng}
-    )
+    eng = reaction.calculate_energy({
+        lith_comp: lith_eng,
+        deli_comp: deli_eng,
+        li_comp: li_eng,
+    })
     return Float(eng)
 
 
@@ -510,9 +512,9 @@ class DelithiationManager:
 
         # Analyse the content
         self.nli = int(self.composition[working_ion])
-        self.composition_without_li = Composition(
-            {key: comp[key] for key in comp if key.symbol != working_ion}
-        )
+        self.composition_without_li = Composition({
+            key: comp[key] for key in comp if key.symbol != working_ion
+        })
         self.nother = self.composition_without_li.num_atoms
 
     @property
@@ -642,13 +644,13 @@ class VoltageCurve:
 
         # Find the terminal compositions
         lithiated = self.entries[0].composition  # One with the maximum lithation level
-        non_working_lithiated = Composition(
-            {key: lithiated[key] for key in lithiated if key.symbol != working_ion}
-        )
+        non_working_lithiated = Composition({
+            key: lithiated[key] for key in lithiated if key.symbol != working_ion
+        })
         delithiated = self.entries[-1].composition
-        non_working_delithiated = Composition(
-            {key: delithiated[key] for key in delithiated if key.symbol != working_ion}
-        )
+        non_working_delithiated = Composition({
+            key: delithiated[key] for key in delithiated if key.symbol != working_ion
+        })
 
         # Sanity check
         assert (
@@ -677,17 +679,17 @@ class VoltageCurve:
 
     @property
     def included_compositions(self):
-        all_comps = list(
-            {entry.composition.reduced_composition for entry in self.entries}
-        )
+        all_comps = list({
+            entry.composition.reduced_composition for entry in self.entries
+        })
         all_comps.sort(key=lambda x: x[self.working_ion] / x.num_atoms, reverse=True)
         return all_comps
 
     @property
     def stable_compositions(self):
-        all_comps = list(
-            {entry.composition.reduced_composition for entry in self.stable_entries}
-        )
+        all_comps = list({
+            entry.composition.reduced_composition for entry in self.stable_entries
+        })
         all_comps.sort(key=lambda x: x[self.working_ion] / x.num_atoms, reverse=True)
         return all_comps
 
@@ -729,9 +731,10 @@ class VoltageCurve:
             lith = self.stable_entries[i]
             deli = self.stable_entries[i + 1]
             voltage = voltage_between_pair(lith, deli, self.ref_entry, self.working_ion)
-            conc_pair_and_voltage.append(
-                [(lith.composition, deli.composition), voltage]
-            )
+            conc_pair_and_voltage.append([
+                (lith.composition, deli.composition),
+                voltage,
+            ])
         return conc_pair_and_voltage
 
     def get_plot_data(

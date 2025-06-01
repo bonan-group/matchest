@@ -44,7 +44,7 @@ def get_primitive(
 ) -> None:
     if output_file is None:
         verbose = True
-    float_format_str = f"{{:{precision+4}.{precision}f}}"
+    float_format_str = f"{{:{precision + 4}.{precision}f}}"
 
     def format_float(x: float) -> str:
         return float_format_str.format(x)

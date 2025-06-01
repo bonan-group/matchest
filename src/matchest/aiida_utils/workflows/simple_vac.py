@@ -222,14 +222,12 @@ def compute_formation_energy(ref_work_misc, v_work_misc, elem_misc):
     elem = elem_structure.sites[0].kind_name
 
     e_form = evac + eelem - ebulk
-    return orm.Dict(
-        {
-            f"V_{elem}": e_form,
-            "E_supercell": ebulk,
-            "E_vac_cell": evac,
-            f"E_{elem}": eelem,
-        }
-    )
+    return orm.Dict({
+        f"V_{elem}": e_form,
+        "E_supercell": ebulk,
+        "E_vac_cell": evac,
+        f"E_{elem}": eelem,
+    })
 
 
 @singledispatch

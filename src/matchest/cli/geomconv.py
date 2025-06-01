@@ -170,12 +170,12 @@ def print_vasp_conv(outcar_file: str) -> None:
         if i == 0:
             de = "--------"
         else:
-            de = f"{energies[i] - energies[i-1]:.6f}"
+            de = f"{energies[i] - energies[i - 1]:.6f}"
         # In case of bad termination
         if len(cpu_times) == i:
             cpu_times.append(np.nan)
         print(
-            f"  {i+1:2d}   {energies[i]:11.6f}   {de:>11}   {max_forces[i]:11.6f}   "
+            f"  {i + 1:2d}   {energies[i]:11.6f}   {de:>11}   {max_forces[i]:11.6f}   "
             f"{max_stresses[i]:11.6f}   {cpu_times[i]:8.1f}       {avg_drifts[i]:11.6f}       {converged[i]:>7}"
         )
 

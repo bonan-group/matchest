@@ -73,7 +73,7 @@ exclude_lines = [
 config-path = "ruff_defaults.toml"
 
 [tool.ruff.format]
-preview = false
+preview = true
 quote-style = "double"
 
 [tool.ruff.lint]
