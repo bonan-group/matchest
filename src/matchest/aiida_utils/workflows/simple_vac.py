@@ -25,9 +25,10 @@ class SimpleVacancyWorkChain(WorkChain):
 
         super().define(spec)
         spec.expose_inputs(VaspRelaxWorkChain, namespace="relax")
-        spec.input("elemental_group_path", valid_type=orm.Str)
+        spec.input("elemental_group_path", valid_type=orm.Str, required=False)
         spec.input("supercell_workchain_updates", valid_type=orm.Dict, required=False)
         spec.input("supercell_dim", valid_type=orm.List)
+        spec.input_namespace("elemental_structures", dynamic=True, required=False)
 
         spec.outline(
             cls.setup,
@@ -82,10 +83,14 @@ class SimpleVacancyWorkChain(WorkChain):
         self.ctx.supercell_dim = self.inputs.supercell_dim.get_list()
 
         # Check if the elemental energies has been calculated
-        workpath = GroupPathX(self.inputs.elemental_group_path.value)
-        for elem in self.ctx.elems:
-            if not workpath[f"{elem}_bulk"].node.is_finished_ok:
-                return self.exit_codes.ERROR_ELEMENTAL_NOT_CALCULATED
+        if "elemental_group_path" in self.inputs:
+            workpath = GroupPathX(self.inputs.elemental_group_path.value)
+            for elem in self.ctx.elems:
+                if not workpath[f"{elem}_bulk"].node.is_finished_ok:
+                    return self.exit_codes.ERROR_ELEMENTAL_NOT_CALCULATED
+            self.ctx.calculate_elemental = False
+        else:
+            self.ctx.calculate_elemental = True
 
     def run_bulk_relax(self):
         """Run the bulk relaxation"""
@@ -106,11 +111,21 @@ class SimpleVacancyWorkChain(WorkChain):
     def run_vac(self):
         """Run vacancy structure calculations"""
 
-        # Takae the relaxed bulk structure as reference structure
+        # Take the relaxed bulk structure as reference structure
         ref_structure = self.ctx.relaxed_bulk
+        running = {}
 
-        # Ensure that relaxations are done with fixed cell
         inputs = self.ctx.relax_inputs
+        elems = self.ctx.elems
+        # Run elemental calculations
+        if self.ctx.calculate_elemental:
+            for elem in elems:
+                structure = self.inputs.elemental_structures[elem]
+                inputs.structure = structure
+                inputs.metadata.label = f"{elem} ELEMENTAL RELAX"
+                running[f"workchain_{elem}"] = self.submit(VaspRelaxWorkChain, **inputs)
+
+        # Update the inputs for supercell calculations
         relax_settings = inputs.relax_settings.get_dict()
         relax_settings["volume"] = False
         relax_settings["shape"] = False
@@ -125,11 +140,9 @@ class SimpleVacancyWorkChain(WorkChain):
         if self.ctx.incar_update:
             param = inputs.vasp.parameters.get_dict()
             param["incar"].update(self.ctx.incar_update)
-            self.inputs.vasp.parameters = orm.Dict(dict=param)
+            inputs.vasp.parameters = orm.Dict(dict=param)
 
         # Elements to make vacancy of
-        elems = self.ctx.elems
-        running = {}
         superdim = "{}{}{}".format(*self.ctx.supercell_dim)
         for elem in elems:
             # Find the first occurance of the element
@@ -158,9 +171,12 @@ class SimpleVacancyWorkChain(WorkChain):
         # Collect the vacancy formation energy results
         for elem in self.ctx.elems:
             vac_workchain = self.ctx[f"workchain_V_{elem}"]
-            elem_misc = GroupPathX(self.inputs.elemental_group_path.value)[
-                f"{elem}_bulk"
-            ].node.outputs.misc
+            if self.ctx.calculate_elemental:
+                elem_misc = self.ctx[f"workchain_{elem}"].outputs.misc
+            else:
+                elem_misc = GroupPathX(self.inputs.elemental_group_path.value)[
+                    f"{elem}_bulk"
+                ].node.outputs.misc
             formation_energy = compute_formation_energy(
                 self.ctx.workchain_supercell.outputs.misc,
                 vac_workchain.outputs.misc,
@@ -205,12 +221,12 @@ def compute_formation_energy(ref_work_misc, v_work_misc, elem_misc):
     elem_structure = q.first()[0]
     elem = elem_structure.sites[0].kind_name
 
-    e_vac = evac + eelem - ebulk
+    e_form = evac + eelem - ebulk
     return orm.Dict(
         {
-            f"V_{elem}": e_vac,
+            f"V_{elem}": e_form,
             "E_supercell": ebulk,
-            "E_vac": e_vac,
+            "E_vac_cell": evac,
             f"E_{elem}": eelem,
         }
     )
