@@ -26,7 +26,7 @@ def get_energy_from_misc(misc):
         return misc["total_energies"]["energy_extrapolated"]
 
 
-def load_mp_struct(mp_id):
+def load_mp_struct(mp_id, api_key=None):
     """
     Load Material Project structures using its api
     """
@@ -46,7 +46,11 @@ def load_mp_struct(mp_id):
     # No data in the db yet - import from pymatgen
     from mp_api.client import MPRester
 
-    rester = MPRester()
+    if api_key is not None:
+        rester = MPRester(api_key)
+    else:
+        # Use default api_key defined via environmental variable or pmgrc file
+        rester = MPRester()
     struc = rester.get_structure_by_material_id(mp_id)
     magmom = struc.site_properties.get("magmom")
     strucd = StructureData(pymatgen=struc)
