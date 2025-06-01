@@ -1,6 +1,7 @@
 """
 Utility module for analysing CASTEP data
 """
+
 import numpy as np
 
 
@@ -51,14 +52,11 @@ def generate_ionic_fix_cons(atoms, indices, mask=None):
         mask = (1, 1, 1)
     for symbol, i in castep_indices:
         if mask[0]:
-            lines.append("{:<4d} {:<2}    {:<4d} 1 0 0".format(
-                count, symbol, i))
+            lines.append(f"{count:<4d} {symbol:<2}    {i:<4d} 1 0 0")
         if mask[1]:
-            lines.append("{:<4d} {:<2}    {:<4d} 0 1 0".format(
-                count + 1, symbol, i))
+            lines.append(f"{count + 1:<4d} {symbol:<2}    {i:<4d} 0 1 0")
         if mask[2]:
-            lines.append("{:<4d} {:<2}    {:<4d} 0 0 1".format(
-                count + 2, symbol, i))
+            lines.append(f"{count + 2:<4d} {symbol:<2}    {i:<4d} 0 0 1")
         count += sum(mask)
     return lines
 
@@ -97,9 +95,10 @@ def take_popn(seed):
     Return a list of StringIO of the population analysis section
     """
     import io
+
     popns = []
     rec = False
-    with open(seed + '.castep') as fh:
+    with open(seed + ".castep") as fh:
         for line in fh:
             if "Atomic Populations (Mulliken)" in line:
                 record = io.StringIO()
@@ -120,11 +119,8 @@ def take_popn(seed):
 def read_popn(fn):
     """Read population file into pandas dataframe"""
     import pandas as pd
-    table = pd.read_table(fn,
-                          sep="\s\s+",
-                          header=2,
-                          comment="=",
-                          engine="python")
+
+    table = pd.read_table(fn, sep=r"\s\s+", header=2, comment="=", engine="python")
     return table
 
 

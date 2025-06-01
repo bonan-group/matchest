@@ -3,26 +3,24 @@ Module with battery related processes
 """
 
 import re
+from typing import Dict, List, Tuple
 
 import numpy as np
 from aiida import orm
 from aiida.engine import calcfunction
 from aiida.orm import (
     ArrayData,
+    Float,
     StructureData,
 )
-from pymatgen.core import Structure
-from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-from typing import Dict, List, Tuple
-
-from aiida.orm import Float
 from ase.build import sort
 from bsym.interface.pymatgen import unique_structure_substitutions
 from pymatgen.analysis.ewald import EwaldSummation
 from pymatgen.analysis.phase_diagram import CompoundPhaseDiagram
 from pymatgen.analysis.reaction_calculator import Reaction
-from pymatgen.core import Composition, Element
+from pymatgen.core import Composition, Element, Structure
 from pymatgen.entries import Entry
+from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
 
 @calcfunction
@@ -704,7 +702,6 @@ class VoltageCurve:
         )
 
     def __repr__(self):
-
         formula = self.entries[0].composition.reduced_formula
         nentry = len(self.entries)
         output = f"VoltageCurve for {formula} with {nentry} entries"
@@ -917,6 +914,7 @@ def sorted_by_ewald(structures: List[Structure]) -> List[Structure]:
     Sort the structures by Ewald energy
     """
     return sorted(structures, key=lambda x: EwaldSummation(x).total_energy)
+
 
 def get_energy_from_misc(misc):
     """

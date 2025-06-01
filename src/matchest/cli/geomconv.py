@@ -17,7 +17,9 @@ analyze_vasp_convergence(outcar_file: str) -> None
 
 import re
 from typing import List
+
 import numpy as np
+
 
 def print_vasp_conv(outcar_file: str) -> None:
     """
@@ -65,25 +67,25 @@ def print_vasp_conv(outcar_file: str) -> None:
 
     # Regular expressions for pattern matching
     patterns = {
-        'nions': re.compile(r'NIONS\s*=\s*(\d+)'),
-        'energy': re.compile(r'^  energy\s*without\s*entropy=\s*([-\d.]+)'),
-        'positions': re.compile(r'POSITION\s*TOTAL-FORCE \(eV/Angst\)'),
-        'volume': re.compile(r'volume of cell\s*:\s*([\d.]+)'),
-        'stress': re.compile(r'^  external pressure =\s*([\d.-]+) kB'),
-        'loop_time': re.compile(r'LOOP\+:\s*cpu time\s*([\d.]+)'),
-        'ediffg': re.compile(r'EDIFFG\s*=\s*([-\d.]+)')
+        "nions": re.compile(r"NIONS\s*=\s*(\d+)"),
+        "energy": re.compile(r"^  energy\s*without\s*entropy=\s*([-\d.]+)"),
+        "positions": re.compile(r"POSITION\s*TOTAL-FORCE \(eV/Angst\)"),
+        "volume": re.compile(r"volume of cell\s*:\s*([\d.]+)"),
+        "stress": re.compile(r"^  external pressure =\s*([\d.-]+) kB"),
+        "loop_time": re.compile(r"LOOP\+:\s*cpu time\s*([\d.]+)"),
+        "ediffg": re.compile(r"EDIFFG\s*=\s*([-\d.]+)"),
     }
 
     try:
-        with open(outcar_file, 'r') as f:
+        with open(outcar_file) as f:
             lines = f.readlines()
-    except IOError:
+    except OSError:
         print(f"Error: Cannot open input file {outcar_file}")
         return
 
     # First pass to get number of atoms
     for line in lines:
-        if match := patterns['nions'].search(line):
+        if match := patterns["nions"].search(line):
             natoms = int(match.group(1))
             break
 
@@ -98,20 +100,20 @@ def print_vasp_conv(outcar_file: str) -> None:
 
     for line in lines:
         # Get EDIFFG
-        if not ediffg and (match := patterns['ediffg'].search(line)):
+        if not ediffg and (match := patterns["ediffg"].search(line)):
             ediffg = float(match.group(1))
 
         # Get volume
-        if not volume and (match := patterns['volume'].search(line)):
+        if not volume and (match := patterns["volume"].search(line)):
             volume = float(match.group(1))
 
         # Get energy
-        if match := patterns['energy'].search(line):
+        if match := patterns["energy"].search(line):
             energies.append(float(match.group(1)))
             reading_forces = False
 
         # Get forces
-        if patterns['positions'].search(line):
+        if patterns["positions"].search(line):
             step += 1
             reading_forces = True
             atoms_read = 0
@@ -130,18 +132,18 @@ def print_vasp_conv(outcar_file: str) -> None:
                 reading_forces = False
 
         # Get total drift (appears after forces)
-        if line.strip().startswith('total drift:'):
+        if line.strip().startswith("total drift:"):
             parts = line.split()
             if len(parts) >= 5:
                 total_drifts[step] = np.array([float(x) for x in parts[2:5]])
 
         # Get stress
-        if patterns['stress'].search(line):
+        if patterns["stress"].search(line):
             #   external pressure =     2144.70 kB  Pullay stress =        0.00 kB
             stresses.append(float(line.split()[3]))
 
         # Get CPU time
-        if match := patterns['loop_time'].search(line):
+        if match := patterns["loop_time"].search(line):
             if step >= 0:  # Ensure we've started collecting steps
                 cpu_times.append(float(match.group(1)))
 
@@ -154,11 +156,15 @@ def print_vasp_conv(outcar_file: str) -> None:
     max_forces = [np.max(np.abs(force)) for force in forces]
     max_stresses = [stress / 10 for stress in stresses]  # Convert to GPa
     avg_drifts = [np.mean(np.abs(drift)) for drift in total_drifts]
-    converged = ['YES' if fmax < abs(ediffg) else 'NO' for fmax in max_forces]
+    converged = ["YES" if fmax < abs(ediffg) else "NO" for fmax in max_forces]
 
     # Print results
-    print(" Step |   E (eV)  |   dE (eV)    |  Fmax (eV/Å) | Smax (Gpa) | Time (s) | Average drift  | Convergence |")
-    print("---------------------------------------------------------------------------------------------------------")
+    print(
+        " Step |   E (eV)  |   dE (eV)    |  Fmax (eV/Å) | Smax (Gpa) | Time (s) | Average drift  | Convergence |"
+    )
+    print(
+        "---------------------------------------------------------------------------------------------------------"
+    )
 
     for i in range(nsteps):
         if i == 0:
@@ -168,7 +174,9 @@ def print_vasp_conv(outcar_file: str) -> None:
         # In case of bad termination
         if len(cpu_times) == i:
             cpu_times.append(np.nan)
-        print(f"  {i+1:2d}   {energies[i]:11.6f}   {de:>11}   {max_forces[i]:11.6f}   "
-              f"{max_stresses[i]:11.6f}   {cpu_times[i]:8.1f}       {avg_drifts[i]:11.6f}       {converged[i]:>7}")
+        print(
+            f"  {i+1:2d}   {energies[i]:11.6f}   {de:>11}   {max_forces[i]:11.6f}   "
+            f"{max_stresses[i]:11.6f}   {cpu_times[i]:8.1f}       {avg_drifts[i]:11.6f}       {converged[i]:>7}"
+        )
 
     print(f"EDIFFG= {ediffg:6.3f}")

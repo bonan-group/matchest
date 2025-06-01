@@ -1,7 +1,9 @@
 """
 A parser for dot casteps
 """
+
 import re
+
 import numpy as np
 
 pattern_geom = r"""
@@ -32,13 +34,14 @@ $
 """
 pattern_SCF = r"^ +(\d+) +([0-9E+-.]+) +([0-9E+-.]+) +([0-9E+-.]+) +([0-9.]+) +<-- SCF"
 
-geom_iter_start = re.compile(r' Starting \w+ iteration')
+geom_iter_start = re.compile(r" Starting \w+ iteration")
 sfc_line = re.compile(pattern_SCF)
 match_geom = re.compile(pattern_geom, re.VERBOSE)
 
 
 class ScfStats:
     """Class representation of SCF loops leading to electronic convergence"""
+
     def __init__(self, data, tags):
         """
         data - a dictionary of the SCF information
@@ -77,18 +80,19 @@ class ScfStats:
         return len(self.data["timming"])
 
     def __repr__(self):
-        return "SCF<avg_time={:.2f}, length={:d}, duration={:.2f}>".format(self.avg_time, len(self), self.duration)
+        return f"SCF<avg_time={self.avg_time:.2f}, length={len(self):d}, duration={self.duration:.2f}>"
 
 
 class DotCastep:
     """Class for a .castep file"""
+
     def __init__(self, fhandle):
         """
         Initialise an DotCastep instance
 
         Parameters
         ----------
-        fhandle: handle-like object 
+        fhandle: handle-like object
             A file handle for the CASTEP file
         """
 
@@ -145,18 +149,18 @@ class DotCastep:
                 timming.append(float(m.group(5)))
             elif data is True and "Final free" in line:
                 ffree = float(line.split()[-2])
-                yield ScfStats(data=dict(eng=eng,
-                                    engf=engf,
-                                    enga=enga,
-                                    timming=timming,
-                                    final_free=ffree),
-                          tags=None)
+                yield ScfStats(
+                    data=dict(
+                        eng=eng, engf=engf, enga=enga, timming=timming, final_free=ffree
+                    ),
+                    tags=None,
+                )
                 eng = []
                 engf = []
                 enga = []
                 timming = []
                 data = False
-                
+
     @property
     def parallel_info(self):
         """Acquire the parallelisation information"""
@@ -164,8 +168,8 @@ class DotCastep:
         nmpi = 1
         g_parallel = 1
         k_parallel = 1
-        gpatt = r'G-vector\((\d+)-way\)'
-        kpatt = r'k-point\((\d+)-way\)'
+        gpatt = r"G-vector\((\d+)-way\)"
+        kpatt = r"k-point\((\d+)-way\)"
         for i, line in enumerate(self.fhandle):
             if "Calculation parallelised over" in line:
                 nmpi = int(line.split()[-2])
@@ -180,13 +184,13 @@ class DotCastep:
                 k_parallel = int(match.group(1))
                 continue
 
-        return {'procs': nmpi, 
-                'k-parallel': k_parallel,
-                'g-parallel': g_parallel,}
-            
+        return {
+            "procs": nmpi,
+            "k-parallel": k_parallel,
+            "g-parallel": g_parallel,
+        }
 
     def parse_geom_info(self):
-
         f = []
         smax = []
         de = []
@@ -236,7 +240,7 @@ class DotCastep:
                 continue
 
             # Capture timing of save and iteration numbers(current)
-            if 'Writing model' in line:
+            if "Writing model" in line:
                 save_times.append(last_time)
                 save_iter.append(current_iter)
 
@@ -250,23 +254,26 @@ class DotCastep:
             # Capture the end of gemo iteration
             geom_match = match_geom.match(line)
             if geom_match:
-                eng.append(float(geom_match.group('H')))
-                iter_num.append(int(geom_match.group('number')))
+                eng.append(float(geom_match.group("H")))
+                iter_num.append(int(geom_match.group("number")))
                 iter_times.append(float(last_time))
-                geom_name = geom_match.group('name')
-                unit = geom_match.group('unit')
+                geom_name = geom_match.group("name")
+                unit = geom_match.group("unit")
                 continue
 
-        out = dict(H=eng,
-                   iter_num=iter_num,
-                   name=geom_name,
-                   unit=unit,
-                   iter_times=iter_times,
-                   save_iter=save_iter,
-                   save_times=save_times)
+        out = dict(
+            H=eng,
+            iter_num=iter_num,
+            name=geom_name,
+            unit=unit,
+            iter_times=iter_times,
+            save_iter=save_iter,
+            save_times=save_times,
+        )
         if aggregate:
             # Need to aggregate the timer
             import numpy as np
+
             timer_array = np.array(iter_times)
             last_record = 0
             for i, time_record in enumerate(iter_times):

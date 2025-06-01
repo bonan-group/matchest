@@ -18,8 +18,6 @@ from ase.build import sort
 from ase.neb import NEB
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
-
-
 # pylint: disable=import-outside-toplevel
 
 
@@ -85,9 +83,9 @@ def magnetic_structure_decorate(structure, magmom):
     )
 
     magmom = magmom.get_list()
-    assert len(magmom) == len(structure.sites), (
-        f"Mismatch between the magmom ({len(magmom)}) and the nubmer of sites ({len(structure.sites)})."
-    )
+    assert (
+        len(magmom) == len(structure.sites)
+    ), f"Mismatch between the magmom ({len(magmom)}) and the nubmer of sites ({len(structure.sites)})."
     old_species = [
         structure.get_kind(site.kind_name).symbol for site in structure.sites
     ]
@@ -301,7 +299,6 @@ def res2structure_smart(file):
 def res2structure(file):
     """Create StructureData from SingleFile data"""
     from aiida.orm import StructureData
-
     from aiida_user_addons.tools.resutils import read_res
 
     with file.open(file.filename) as fhandle:
