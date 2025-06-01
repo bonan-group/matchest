@@ -9,9 +9,7 @@ def mc():
 
 
 @mc.command()
-@click.argument(
-    "input_file", type=click.Path(exists=True, path_type=Path), default="POSCAR"
-)
+@click.argument("input_file", type=click.Path(exists=True, path_type=Path), default="POSCAR")
 @click.option(
     "--input-format",
     type=str,
@@ -81,9 +79,7 @@ def prim(
 
 
 @mc.command()
-@click.argument(
-    "filename", type=click.Path(exists=True, path_type=Path), required=False
-)
+@click.argument("filename", type=click.Path(exists=True, path_type=Path), required=False)
 @click.option("--filetype", type=str, help="File format for ASE importer")
 def spg(filename, filetype):
     """Get space group information for different thresholds"""
@@ -93,9 +89,7 @@ def spg(filename, filetype):
 
 
 @mc.command()
-@click.argument(
-    "filename", type=click.Path(exists=True, path_type=Path), default="POSCAR"
-)
+@click.argument("filename", type=click.Path(exists=True, path_type=Path), default="POSCAR")
 @click.option("--type", "file_type", type=str, help="Format of crystal structure file")
 @click.option(
     "--min",
@@ -165,9 +159,7 @@ def vasp_max_force(file):
             continue
         if "total drift" in line:
             in_section = False
-            print(
-                f"Loop {cycles:<5} Maximum force: {max_force:<5.3g} at atom {max_force_idx}"
-            )
+            print(f"Loop {cycles:<5} Maximum force: {max_force:<5.3g} at atom {max_force_idx}")
             max_force = 0
             max_force_idx = 0
             continue
@@ -186,9 +178,7 @@ def vasp_max_force(file):
 
 @mc.command("view-files-ovito", help="Show all files with OVITO")
 @click.argument("files", nargs=-1)
-@click.option(
-    "--sort/--no-sort", default=True, help="Sort the structures by energy per atoms"
-)
+@click.option("--sort/--no-sort", default=True, help="Sort the structures by energy per atoms")
 def view_res_ovito(files, sort):
     """A wrapper command for viewing files as a trajectory in ovito"""
     from ase.io import read
@@ -206,9 +196,7 @@ def view_res_ovito(files, sort):
             except RuntimeError:
                 eng = 0.0
             engs.append(eng)
-        atoms_list = [
-            atoms for _, atoms in sorted(zip(engs, atoms_list), key=lambda x: x[0])
-        ]
+        atoms_list = [atoms for _, atoms in sorted(zip(engs, atoms_list), key=lambda x: x[0])]
     view(atoms_list, viewer="ovito")
 
 
@@ -301,9 +289,7 @@ def castep_timing(dot_castep):
     default="standard",
     type=click.Choice(["standard", "primitive", "primitive-standard"]),
 )
-@click.option(
-    "--output-type", "-o", default="cif", type=click.Choice(["cif", "poscar"])
-)
+@click.option("--output-type", "-o", default="cif", type=click.Choice(["cif", "poscar"]))
 def cmd_convert_cell(input, output, cell_type, symprec, output_type, angtol):
     """
     Convert a crystal structure to primitive/standard cell using pymatgen's SpaceGroupAnalyser"""
@@ -341,10 +327,6 @@ def cmd_charge_neutral(charges, species, nmax):
         tot = sum([seq[i] * charges[i] for i in range(len(charges))])
 
         if tot == 0:
-            forms.add(
-                Composition(
-                    "".join([f"{sym}{num}" for sym, num in zip(species, seq)])
-                ).reduced_formula
-            )
+            forms.add(Composition("".join([f"{sym}{num}" for sym, num in zip(species, seq)])).reduced_formula)
     for item in forms:
         click.echo(item)

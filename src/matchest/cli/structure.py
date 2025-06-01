@@ -18,17 +18,13 @@ def get_primitive_atoms(
         atoms.get_scaled_positions(),
         atoms.numbers,
     )
-    spacegroup = spglib.get_spacegroup(
-        atoms_spglib, symprec=threshold, angle_tolerance=angle_tolerance
-    )
+    spacegroup = spglib.get_spacegroup(atoms_spglib, symprec=threshold, angle_tolerance=angle_tolerance)
     if print_spacegroup:
         print(f"Space group: {spacegroup}")
     cell, positions, atomic_numbers = spglib.find_primitive(
         atoms_spglib, symprec=threshold, angle_tolerance=angle_tolerance
     )
-    primitive_atoms = ase.Atoms(
-        scaled_positions=positions, cell=cell, numbers=atomic_numbers, pbc=True
-    )
+    primitive_atoms = ase.Atoms(scaled_positions=positions, cell=cell, numbers=atomic_numbers, pbc=True)
     return primitive_atoms
 
 
@@ -82,6 +78,4 @@ def get_spacegroup(filename: Optional[Path] = None, filetype: Optional[str] = No
     print("| Threshold / Å |    Space group    |")
     print("|---------------|-------------------|")
     for threshold in (1e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 1e-1):
-        print(
-            f"|    {threshold:0.5f}    |  {spglib.get_spacegroup(cell, symprec=threshold): <16} |"
-        )
+        print(f"|    {threshold:0.5f}    |  {spglib.get_spacegroup(cell, symprec=threshold): <16} |")

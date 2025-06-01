@@ -137,9 +137,7 @@ def get_entry_from_calc(calc):
         incar = calc.inputs.parameters.get_dict()
         pots = {pot.functional for pot in calc.inputs.potential.values()}
         if len(pots) != 1:
-            raise RuntimeError(
-                "Inconsistency in POTCAR functionals! Something is very wrong..."
-            )
+            raise RuntimeError("Inconsistency in POTCAR functionals! Something is very wrong...")
         pot = pots.pop()
 
     elif calc.process_label == "VaspWorkChain":

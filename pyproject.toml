@@ -72,10 +72,13 @@ exclude_lines = [
 [tool.hatch.envs.hatch-static-analysis]
 config-path = "ruff_defaults.toml"
 
+[tool.ruff]
+line-length = 120
+
 [tool.ruff.format]
 preview = true
 quote-style = "double"
 
 [tool.ruff.lint]
 preview = false
-extend-select = []
+extend-select = ["E", "B", "Q", "F"]

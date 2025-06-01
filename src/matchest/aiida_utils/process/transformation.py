@@ -83,21 +83,17 @@ def magnetic_structure_decorate(structure, magmom):
     )
 
     magmom = magmom.get_list()
-    assert (
-        len(magmom) == len(structure.sites)
+    assert len(magmom) == len(
+        structure.sites
     ), f"Mismatch between the magmom ({len(magmom)}) and the nubmer of sites ({len(structure.sites)})."
-    old_species = [
-        structure.get_kind(site.kind_name).symbol for site in structure.sites
-    ]
+    old_species = [structure.get_kind(site.kind_name).symbol for site in structure.sites]
     new_species, magmom_mapping = create_additional_species(old_species, magmom)
     new_structure = StructureData()
     new_structure.set_cell(structure.cell)
     new_structure.set_pbc(structure.pbc)
     for site, name in zip(structure.sites, new_species):
         this_symbol = structure.get_kind(site.kind_name).symbol
-        new_structure.append_atom(
-            position=site.position, symbols=this_symbol, name=name
-        )
+        new_structure.append_atom(position=site.position, symbols=this_symbol, name=name)
 
     # Keep the label
     new_structure.label = structure.label
@@ -126,9 +122,7 @@ def magnetic_structure_dedecorate(structure, mapping):
 
     for site, name in zip(structure.sites, new_species):
         this_symbol = structure.get_kind(site.kind_name).symbol
-        new_structure.append_atom(
-            position=site.position, symbols=this_symbol, name=name
-        )
+        new_structure.append_atom(position=site.position, symbols=this_symbol, name=name)
     new_structure.label = structure.label
     return {"structure": new_structure, "magmom": orm.List(list=magmom)}
 
@@ -149,9 +143,7 @@ def make_vac(cell, indices, supercell, **kwargs):
         supercell_atoms = make_supercell(atoms, np.array(supercell.get_list()))
 
     mask = np.in1d(np.arange(len(supercell_atoms)), indices.get_list())
-    supercell_atoms = supercell_atoms[
-        ~mask
-    ]  ## Remove any atoms in the original indices
+    supercell_atoms = supercell_atoms[~mask]  # Remove any atoms in the original indices
     supercell_atoms.set_tags(None)
     supercell_atoms.set_masses(None)
     # Now I sort the supercell in the order of chemical symbols
@@ -195,17 +187,11 @@ def _make_vac_at_elem(
     # Expand the supercell with S subsituted strucutre
     struc = struc * supercell.get_list()
     nelem_atoms = int(struc.composition[elem])
-    unique_structure = unique_structure_substitutions(
-        struc, elem, {"Og": nsub, elem: nelem_atoms - nsub}
-    )
+    unique_structure = unique_structure_substitutions(struc, elem, {"Og": nsub, elem: nelem_atoms - nsub})
     # Convert back to normal structure
     # Remove Og as they are vacancies, Convert Ts back to elem
     for ustruc in unique_structure:
-        p_indices = [
-            n
-            for n, site in enumerate(ustruc.sites)
-            if site.species == Composition("Og")
-        ]
+        p_indices = [n for n, site in enumerate(ustruc.sites) if site.species == Composition("Og")]
         ustruc.remove_sites(p_indices)
         # Convert S sites back to O
         ustruc["Ts"] = elem
@@ -233,9 +219,7 @@ def make_vac_at_elem(
 
 
 @calcfunction
-def make_vac_at_elem_and_shake(
-    cell, elem, excluded_sites, supercell, shake_amp, nsub=1
-):
+def make_vac_at_elem_and_shake(cell, elem, excluded_sites, supercell, shake_amp, nsub=1):
     """
     Make lots of vacancy containing cells usnig BSYM
     In addition, we shake the nearest neighbours with that given by shake_amp.
@@ -265,11 +249,7 @@ def rattle(structure: orm.StructureData, amp: orm.Float) -> orm.StructureData:
     """
     native_keys = ["cell", "pbc1", "pbc2", "pbc3", "kinds", "sites", "mp_id"]
     # Keep the foreign keys as it is
-    foreign_attrs = {
-        key: value
-        for key, value in structure.attributes.items()
-        if key not in native_keys
-    }
+    foreign_attrs = {key: value for key, value in structure.attributes.items() if key not in native_keys}
     atoms = structure.get_ase()
     atoms.rattle(amp.value)
     # Clean any tags etc
@@ -375,9 +355,7 @@ def get_refined_structure(structure, symprec, angle_tolerance):
     from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
     pstruct = structure.get_pymatgen()
-    ana = SpacegroupAnalyzer(
-        pstruct, symprec=symprec.value, angle_tolerance=angle_tolerance.value
-    )
+    ana = SpacegroupAnalyzer(pstruct, symprec=symprec.value, angle_tolerance=angle_tolerance.value)
     ps = ana.get_refined_structure()
     out = StructureData(pymatgen=ps)
     out.label = structure.label + " REFINED"
@@ -391,9 +369,7 @@ def get_conventional_standard_structure(structure, symprec, angle_tolerance):
     from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 
     pstruct = structure.get_pymatgen()
-    ana = SpacegroupAnalyzer(
-        pstruct, symprec=symprec.value, angle_tolerance=angle_tolerance.value
-    )
+    ana = SpacegroupAnalyzer(pstruct, symprec=symprec.value, angle_tolerance=angle_tolerance.value)
     ps = ana.get_conventional_standard_structure()
     out = StructureData(pymatgen=ps)
     out.label = structure.label + " CONVENTIONAL STANDARD"
@@ -496,9 +472,7 @@ def neb_interpolate(init_structure, final_strucrture, nimages):
     outputs = {"image_init": out_init}
     for i, out in enumerate(neb.images[1:-1]):
         outputs[f"image_{i + 1:02d}"] = StructureData(ase=out)
-        outputs[f"image_{i + 1:02d}"].label = (
-            init_structure.label + f" FRAME {i + 1:02d}"
-        )
+        outputs[f"image_{i + 1:02d}"].label = init_structure.label + f" FRAME {i + 1:02d}"
     outputs["image_final"] = out_final
     return outputs
 
@@ -529,9 +503,7 @@ def fix_atom_order(reference: StructureData, to_fix: StructureData):
         min_idx = np.argmin(dists)
         min_dist = min(dists)
         if min_dist > 0.5:
-            print(
-                f"Large displacement found - moving atom {j} to {i} - please check if this is correct!"
-            )
+            print(f"Large displacement found - moving atom {j} to {i} - please check if this is correct!")
         new_indices[i] = min_idx
 
     afixed = afix[new_indices]

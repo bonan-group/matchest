@@ -34,9 +34,7 @@ def delithiate_by_wyckoff(structure, wyckoff, **kwargs):
     natoms = len(psymm.sites)
 
     rm_indices = []
-    for lsite, lidx, symbol in zip(
-        psymm.equivalent_sites, psymm.equivalent_indices, psymm.wyckoff_symbols
-    ):
+    for lsite, lidx, symbol in zip(psymm.equivalent_sites, psymm.equivalent_indices, psymm.wyckoff_symbols):
         site = lsite[0]
         if site.species_string != remove_symbol:
             continue
@@ -47,9 +45,7 @@ def delithiate_by_wyckoff(structure, wyckoff, **kwargs):
     psymm.remove_sites(rm_indices)
     out = StructureData(pymatgen=Structure.from_sites(psymm.sites))
     for kind in out.kinds:
-        assert not re.search(
-            r"\d", kind.name
-        ), f"Kind name: {kind.name} contains indices"
+        assert not re.search(r"\d", kind.name), f"Kind name: {kind.name} contains indices"
 
     # Set some special attribute
     out.base.attributes.set("removed_specie", remove_symbol)
@@ -79,11 +75,7 @@ def delithiate_full(structure, **kwargs):
     """
     remove_symbol = kwargs.get("element", orm.Str("Li"))
     pstruct = structure.get_pymatgen()
-    to_remove = [
-        idx
-        for idx, site in enumerate(pstruct.sites)
-        if site.species_string == remove_symbol
-    ]
+    to_remove = [idx for idx, site in enumerate(pstruct.sites) if site.species_string == remove_symbol]
     pstruct.remove_sites(to_remove)
 
     out = StructureData(pymatgen=pstruct)
@@ -118,11 +110,7 @@ def delithiate_one(structure, **kwargs):
 
     remove_symbol = kwargs.get("element", orm.Str("Li"))
     pstruct = structure.get_pymatgen()
-    to_remove = [
-        idx
-        for idx, site in enumerate(pstruct.sites)
-        if site.species_string == remove_symbol
-    ]
+    to_remove = [idx for idx, site in enumerate(pstruct.sites) if site.species_string == remove_symbol]
     outdict = {}
     for idx, site in enumerate(to_remove):
         tmp_struct = structure.get_pymatgen()
@@ -132,9 +120,7 @@ def delithiate_one(structure, **kwargs):
         out.base.attributes.set("removed_specie", remove_symbol)
         out.base.attributes.set("removed_site", site)
         out.label = structure.label + f" delithiated 1 - {idx}"
-        out.description = (
-            f"A structure with one Li removed, crated from {structure.uuid}"
-        )
+        out.description = f"A structure with one Li removed, crated from {structure.uuid}"
 
         # Create the mask
         mask = []
@@ -174,9 +160,7 @@ def delithiate_unique_sites(cell, excluded_sites, nsub, atol, **kwargs):
     )
 
 
-def _delithiate_unique_sites(
-    cell, excluded_sites, nsub, atol, pmg_only=False, limit=None, element="Li"
-):
+def _delithiate_unique_sites(cell, excluded_sites, nsub, atol, pmg_only=False, limit=None, element="Li"):
     """
     Make lots of delithiated non-equivalent cells using BSYM
 
@@ -224,17 +208,11 @@ def _delithiate_unique_sites(
             struc, element, {vacancy_dummy: nsub}, verbose=True, atol=float(atol)
         )
     else:
-        raise ValueError(
-            f"There are {noli} {element} but requested to remove {nsub} of them!!"
-        )
+        raise ValueError(f"There are {noli} {element} but requested to remove {nsub} of them!!")
 
     # Convert back to normal structure
     for ustruc in unique_structure:
-        p_indices = [
-            n
-            for n, site in enumerate(ustruc.sites)
-            if site.species == Composition(vacancy_dummy)
-        ]
+        p_indices = [n for n, site in enumerate(ustruc.sites) if site.species == Composition(vacancy_dummy)]
         ustruc.remove_sites(p_indices)
         ustruc[exclude_dummy] = element
 
@@ -256,7 +234,7 @@ def _delithiate_unique_sites(
         # can be used to redfine per-site properties such as the mangetic moments
         # Simply search for the close position matches.
         mapping = []
-        for i_new, new_site in enumerate(s.sites):
+        for _, new_site in enumerate(s.sites):
             found = False
             for i_old, old_site in enumerate(struc.sites):
                 dist = new_site.distance(old_site)
@@ -476,9 +454,7 @@ def _is_comparable(calc1, calc2):
             return False
     for key in warn_keys:
         if _get_incar_tag(key, indict1) != _get_incar_tag(key, indict2):
-            print(
-                f"WARNING: mismatch in key {key} - two calculations may not be comparable"
-            )
+            print(f"WARNING: mismatch in key {key} - two calculations may not be comparable")
     return True
 
 
@@ -500,9 +476,7 @@ def get_input_parameters_dict(out_node):
 class DelithiationManager:
     """Utility tool for managing delithiation process"""
 
-    def __init__(
-        self, structure: Structure, working_ion="Li", tm_ions=("Fe", "Mn", "Co", "Ni")
-    ):
+    def __init__(self, structure: Structure, working_ion="Li", tm_ions=("Fe", "Mn", "Co", "Ni")):
         """Instantiate a `DelithiationManager` object by giving a structure"""
         self.structure = structure
         comp = structure.composition
@@ -512,9 +486,7 @@ class DelithiationManager:
 
         # Analyse the content
         self.nli = int(self.composition[working_ion])
-        self.composition_without_li = Composition({
-            key: comp[key] for key in comp if key.symbol != working_ion
-        })
+        self.composition_without_li = Composition({key: comp[key] for key in comp if key.symbol != working_ion})
         self.nother = self.composition_without_li.num_atoms
 
     @property
@@ -539,9 +511,7 @@ class DelithiationManager:
         ) = self.composition_without_li.get_reduced_composition_and_factor()
         return self.nli / factor, reduced
 
-    def create_delithaited_structures(
-        self, num_remove, atol=1e-5, dummy="He"
-    ) -> List[Structure]:
+    def create_delithaited_structures(self, num_remove, atol=1e-5, dummy="He") -> List[Structure]:
         """
         Generated delithiated structures
         """
@@ -583,20 +553,20 @@ class DelithiationManager:
         max_remove = nli * frac_remove
         if abs(round(max_remove) - max_remove) > 1e-5:
             raise RuntimeError(
-                f"The final lithiation level ({final_li_level}) does not represent an integer number ({self.lithiation_level})"
+                f"The final lithiation level ({final_li_level}) does not represent "
+                f"an integer number ({self.lithiation_level})"
                 f"of {self.working_ion} atoms in the unit cell (requested to remove {max_remove} atoms)."
             )
         max_remove = int(round(max_remove))
         records = {}
         for num_remove in range(1, max_remove + 1):
-            frames = self.create_delithaited_structures(
-                num_remove, dummy=dummy, atol=atol
-            )
+            frames = self.create_delithaited_structures(num_remove, dummy=dummy, atol=atol)
             # If taking only N lowest energy states....
             if pick_ewald_n_lowest is not None:
                 if oxidation_state_mapping is None:
                     raise ValueError(
-                        "Keyword argument 'oxidation_state_mapping' must be passed for ranking with electrostatic energy."
+                        "Keyword argument 'oxidation_state_mapping' must be passed for ranking with "
+                        "electrostatic energy."
                     )
                 for frame in frames:
                     frame.add_oxidation_state_by_element(oxidation_state_mapping)
@@ -613,11 +583,7 @@ class DelithiationManager:
 
 def remove_composition(entries: List[Entry], comp: str) -> List[Entry]:
     """Remove a specific composition from a list of entries"""
-    return [
-        entry
-        for entry in entries
-        if entry.composition.reduced_formula != comp.reduced_formula
-    ]
+    return [entry for entry in entries if entry.composition.reduced_formula != comp.reduced_formula]
 
 
 class VoltageCurve:
@@ -644,19 +610,14 @@ class VoltageCurve:
 
         # Find the terminal compositions
         lithiated = self.entries[0].composition  # One with the maximum lithation level
-        non_working_lithiated = Composition({
-            key: lithiated[key] for key in lithiated if key.symbol != working_ion
-        })
+        non_working_lithiated = Composition({key: lithiated[key] for key in lithiated if key.symbol != working_ion})
         delithiated = self.entries[-1].composition
         non_working_delithiated = Composition({
             key: delithiated[key] for key in delithiated if key.symbol != working_ion
         })
 
         # Sanity check
-        assert (
-            non_working_lithiated.reduced_composition
-            == non_working_delithiated.reduced_composition
-        )
+        assert non_working_lithiated.reduced_composition == non_working_delithiated.reduced_composition
 
         # Normalise terminal composition to the delithiated composition
         factor = non_working_lithiated.num_atoms / non_working_delithiated.num_atoms
@@ -669,9 +630,7 @@ class VoltageCurve:
             ],
             normalize_terminal_compositions=False,
         )
-        self.stable_entries = [
-            entry.original_entry for entry in self.phase_diagram.stable_entries
-        ]
+        self.stable_entries = [entry.original_entry for entry in self.phase_diagram.stable_entries]
         self.stable_entries.sort(
             key=lambda x: x.composition[working_ion] / x.composition.num_atoms,
             reverse=True,
@@ -679,17 +638,13 @@ class VoltageCurve:
 
     @property
     def included_compositions(self):
-        all_comps = list({
-            entry.composition.reduced_composition for entry in self.entries
-        })
+        all_comps = list({entry.composition.reduced_composition for entry in self.entries})
         all_comps.sort(key=lambda x: x[self.working_ion] / x.num_atoms, reverse=True)
         return all_comps
 
     @property
     def stable_compositions(self):
-        all_comps = list({
-            entry.composition.reduced_composition for entry in self.stable_entries
-        })
+        all_comps = list({entry.composition.reduced_composition for entry in self.stable_entries})
         all_comps.sort(key=lambda x: x[self.working_ion] / x.num_atoms, reverse=True)
         return all_comps
 
@@ -707,9 +662,7 @@ class VoltageCurve:
         formula = self.entries[0].composition.reduced_formula
         nentry = len(self.entries)
         output = f"VoltageCurve for {formula} with {nentry} entries"
-        output += (
-            f"\nAverage voltage: {self.average_voltage:.3f}\nCompositions: (* stable)"
-        )
+        output += f"\nAverage voltage: {self.average_voltage:.3f}\nCompositions: (* stable)"
         # Find the compositions
         all_comps = self.included_compositions
         stable_comps = self.stable_compositions
@@ -737,9 +690,7 @@ class VoltageCurve:
             ])
         return conc_pair_and_voltage
 
-    def get_plot_data(
-        self, norm_formula=None, x_axis_deli=False
-    ) -> Tuple[List[float], List[float]]:
+    def get_plot_data(self, norm_formula=None, x_axis_deli=False) -> Tuple[List[float], List[float]]:
         """
         Return the data used for ploting.
 
@@ -752,7 +703,7 @@ class VoltageCurve:
         """
         x_comp = []
         y_volt = []
-        for i, (comps, vol) in enumerate(self.compute_voltages()):
+        for _, (comps, vol) in enumerate(self.compute_voltages()):
             x_comp.extend(comps)
             y_volt.extend([vol, vol])
 
@@ -766,9 +717,7 @@ class VoltageCurve:
         x_val = []
         for comp in x_comp:
             conc = ion_conc(comp, self.working_ion)
-            eff_nli = (
-                conc / li_norm_conc * nli_norm
-            )  # Effective Li number refected to the normalisation formula
+            eff_nli = conc / li_norm_conc * nli_norm  # Effective Li number refected to the normalisation formula
 
             if x_axis_deli:
                 x_val.append(nli_norm - eff_nli)
@@ -828,17 +777,13 @@ def voltage_between_pair(lith, deli, ref_entry, working_ion="Li") -> float:
     nform2 = deli.composition.num_atoms - deli.composition[working_ion]
     nli1 = lith.composition[working_ion]
     nli2 = deli.composition[working_ion]
-    effective_change = (
-        nli1 - nli2 / nform2 * nform1
-    )  # Normalised to the delithiated phase
+    effective_change = nli1 - nli2 / nform2 * nform1  # Normalised to the delithiated phase
     e1 = lith.energy
     e2 = deli.energy
     de = e2 / nform2 * nform1 - e1
     # print(de, effective_change, nform1, nform2)
     # Voltage is the change of free energy (energy) per Li
-    voltage = (
-        de + effective_change * ref_entry.energy / ref_entry.composition.num_atoms
-    ) / effective_change
+    voltage = (de + effective_change * ref_entry.energy / ref_entry.composition.num_atoms) / effective_change
     return voltage
 
 
@@ -850,21 +795,15 @@ def ion_conc(comp: Composition, ion: str) -> float:
     return li_conc
 
 
-def count_delithiated_multiple_level(
-    structure: Structure, final_li_level: float, atol=1e-5
-):
+def count_delithiated_multiple_level(structure: Structure, final_li_level: float, atol=1e-5):
     """Return the total number of structures to be generated"""
     manager = DelithiationManager(structure)
-    frame_dict = manager.create_delithiated_structures_multiple_levels(
-        float(final_li_level), atol=atol
-    )
+    frame_dict = manager.create_delithiated_structures_multiple_levels(float(final_li_level), atol=atol)
     return sum(len(sublist) for sublist in frame_dict.values())
 
 
 @calcfunction
-def create_delithiated_multiple_level(
-    structure, final_li_level, rattle, **params
-) -> Dict[str, StructureData]:
+def create_delithiated_multiple_level(structure, final_li_level, rattle, **params) -> Dict[str, StructureData]:
     """
     Create a series of delithiated frames with different lithiation levels
 
@@ -907,7 +846,8 @@ def create_delithiated_multiple_level(
                 atoms.rattle(rattle.value)
             new_structure = StructureData(ase=sort(atoms))
             new_structure.label = structure.label + f" DELI {nremoved} {idx}"
-            new_structure.description = f"Delithiated structure with {nremoved} removed Li atoms and index {nremoved} of the returned unique structures."
+            new_structure.description = f"Delithiated structure with {nremoved} removed Li atoms"
+            f" and index {nremoved} of the returned unique structures."
             output["structure_" + str(nremoved) + f"_{idx}"] = new_structure
     return output
 

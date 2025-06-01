@@ -41,9 +41,7 @@ class SimpleVacancyWorkChain(WorkChain):
         spec.output_namespace("relaxed_structures", dynamic=True)
         spec.output_namespace("miscs", dynamic=True)
         spec.output_namespace("vacancy_formation_energies", dynamic=True)
-        spec.exit_code(
-            501, "ERROR_BULK_RELAX_FAILED", message="Bulk relaxation is failed"
-        )
+        spec.exit_code(501, "ERROR_BULK_RELAX_FAILED", message="Bulk relaxation is failed")
         spec.exit_code(
             500,
             "ERROR_ELEMENTAL_NOT_CALCULATED",
@@ -54,32 +52,18 @@ class SimpleVacancyWorkChain(WorkChain):
         """
         Setup the inputs for the relaxation workchain
         """
-        self.ctx.relax_inputs = self.exposed_inputs(
-            VaspRelaxWorkChain, namespace="relax"
-        )
+        self.ctx.relax_inputs = self.exposed_inputs(VaspRelaxWorkChain, namespace="relax")
         self.ctx.relaxed_bulk = None
         if "supercell_workchain_updates" in self.inputs:
-            self.ctx.supercell_workchain_updates = (
-                self.inputs.supercell_workchain_updates
-            )
+            self.ctx.supercell_workchain_updates = self.inputs.supercell_workchain_updates
         else:
             self.ctx.supercell_workchain_updates = {}
-        self.ctx.relax_settings_update = self.ctx.supercell_workchain_updates.get(
-            "relax_settings", {}
-        )
-        self.ctx.options_update = self.ctx.supercell_workchain_updates.get(
-            "options", {}
-        )
-        self.ctx.settings_update = self.ctx.supercell_workchain_updates.get(
-            "settings", {}
-        )
+        self.ctx.relax_settings_update = self.ctx.supercell_workchain_updates.get("relax_settings", {})
+        self.ctx.options_update = self.ctx.supercell_workchain_updates.get("options", {})
+        self.ctx.settings_update = self.ctx.supercell_workchain_updates.get("settings", {})
         self.ctx.incar_update = self.ctx.supercell_workchain_updates.get("incar", {})
-        self.ctx.elems = list(
-            set(self.inputs.relax.structure.get_ase().symbols)
-        )  # Elements to make vacancy
-        self.ctx.formula = (
-            self.ctx.relax_inputs.structure.get_ase().get_chemical_formula()
-        )
+        self.ctx.elems = list(set(self.inputs.relax.structure.get_ase().symbols))  # Elements to make vacancy
+        self.ctx.formula = self.ctx.relax_inputs.structure.get_ase().get_chemical_formula()
         self.ctx.supercell_dim = self.inputs.supercell_dim.get_list()
 
         # Check if the elemental energies has been calculated
@@ -102,9 +86,7 @@ class SimpleVacancyWorkChain(WorkChain):
         """Inspect the bulk relaxation"""
 
         if self.ctx.bulk_relax_workchain.is_finished_ok:
-            self.ctx.relaxed_bulk = (
-                self.ctx.bulk_relax_workchain.outputs.relax.structure
-            )
+            self.ctx.relaxed_bulk = self.ctx.bulk_relax_workchain.outputs.relax.structure
             return
         return self.exit_codes.ERROR_BULK_RELAXATION_FAILED
 
@@ -131,12 +113,8 @@ class SimpleVacancyWorkChain(WorkChain):
         relax_settings["shape"] = False
         inputs.relax_settings = orm.Dict(dict=relax_settings)
         # Update other configuration ports
-        inputs.vasp.settings = update_dict_node(
-            inputs.vasp.settings, self.ctx.settings_update
-        )
-        inputs.vasp.options = update_dict_node(
-            inputs.vasp.options, self.ctx.options_update
-        )
+        inputs.vasp.settings = update_dict_node(inputs.vasp.settings, self.ctx.settings_update)
+        inputs.vasp.options = update_dict_node(inputs.vasp.options, self.ctx.options_update)
         if self.ctx.incar_update:
             param = inputs.vasp.parameters.get_dict()
             param["incar"].update(self.ctx.incar_update)
@@ -156,9 +134,7 @@ class SimpleVacancyWorkChain(WorkChain):
             running[f"workchain_V_{elem}"] = self.submit(VaspRelaxWorkChain, **inputs)
 
         # Supercell calculation
-        supercell_ref = make_supercell(ref_structure, self.ctx.supercell_dim)[
-            "structure"
-        ]
+        supercell_ref = make_supercell(ref_structure, self.ctx.supercell_dim)["structure"]
         inputs.structure = supercell_ref
         inputs.metadata.label = f"{self.ctx.formula} {superdim} RELAX"
         running["workchain_supercell"] = self.submit(VaspRelaxWorkChain, **inputs)
@@ -174,9 +150,7 @@ class SimpleVacancyWorkChain(WorkChain):
             if self.ctx.calculate_elemental:
                 elem_misc = self.ctx[f"workchain_{elem}"].outputs.misc
             else:
-                elem_misc = GroupPathX(self.inputs.elemental_group_path.value)[
-                    f"{elem}_bulk"
-                ].node.outputs.misc
+                elem_misc = GroupPathX(self.inputs.elemental_group_path.value)[f"{elem}_bulk"].node.outputs.misc
             formation_energy = compute_formation_energy(
                 self.ctx.workchain_supercell.outputs.misc,
                 vac_workchain.outputs.misc,
@@ -185,9 +159,7 @@ class SimpleVacancyWorkChain(WorkChain):
             self.out(f"miscs.V_{elem}", vac_workchain.outputs.misc)
             self.out(f"miscs.element_{elem}", elem_misc)
             self.out(f"vacancy_formation_energies.V_{elem}", formation_energy)
-            self.out(
-                f"relaxed_structures.V_{elem}", vac_workchain.outputs.relax.structure
-            )
+            self.out(f"relaxed_structures.V_{elem}", vac_workchain.outputs.relax.structure)
 
         self.out("miscs.supercell", self.ctx.workchain_supercell.outputs.misc)
         self.out(

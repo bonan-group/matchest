@@ -34,18 +34,12 @@ def compose_atoms(calcnode) -> ase.Atoms:
 
     links = [x.link_label for x in calcnode.base.links.get_outgoing().all()]
     misc = calcnode.outputs.misc.get_dict()
-    if (
-        "force" in links
-        and "stress" in links
-        and "energy_free" in misc["total_energies"]
-    ):
+    if "force" in links and "stress" in links and "energy_free" in misc["total_energies"]:
         eng = misc["total_energies"]["energy_free"]
         forces = calcnode.outputs.forces.get_array("final")
         stress = calcnode.outputs.stress.get_array("final") * (GPa / 10)
     elif (
-        "forces" in misc
-        and "stress" in misc
-        and "energy_free" in misc["total_energies"]
+        "forces" in misc and "stress" in misc and "energy_free" in misc["total_energies"]
     ):  # Forces and stress has been parsed and made avaliable
         eng = misc["total_energies"]["energy_free"]
         if "final" in misc["forces"]:

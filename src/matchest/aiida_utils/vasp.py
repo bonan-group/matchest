@@ -36,9 +36,7 @@ def get_functional(incar: dict, pot: str) -> str:
             if gga.lower() == "ps":
                 return "pbesol"
         elif (not gga) or gga.lower() == "pe":
-            if incar.get("aexx") in [0.25, None] and (
-                incar.get("hfscreen") - 0.2 < 0.01
-            ):
+            if incar.get("aexx") in [0.25, None] and (incar.get("hfscreen") - 0.2 < 0.01):
                 return "hse06"
 
     return "unknown"

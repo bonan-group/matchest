@@ -70,13 +70,9 @@ def calc_kpt_tuple(atoms, cutoff_length=10, realspace=False, mode="default"):
         rounding = "up"
 
     if realspace:
-        return calc_kpt_tuple_naive(
-            atoms, cutoff_length=cutoff_length, rounding=rounding
-        )
+        return calc_kpt_tuple_naive(atoms, cutoff_length=cutoff_length, rounding=rounding)
     else:
-        return calc_kpt_tuple_recip(
-            atoms, cutoff_length=cutoff_length, rounding=rounding
-        )
+        return calc_kpt_tuple_recip(atoms, cutoff_length=cutoff_length, rounding=rounding)
 
 
 def get_increments(
@@ -86,9 +82,7 @@ def get_increments(
     return tuple(1.0 / (2 * a) for a in lattice_lengths)
 
 
-def cutoff_series(
-    atoms: ase.Atoms, l_min: float, l_max: float, decimals: int = 4
-) -> List[float]:
+def cutoff_series(atoms: ase.Atoms, l_min: float, l_max: float, decimals: int = 4) -> List[float]:
     """Find multiples of l0 members within a range."""
     recip_cell = atoms.cell.reciprocal()
     lattice_lengths = np.linalg.norm(recip_cell, axis=1)
@@ -96,15 +90,11 @@ def cutoff_series(
     members = set()
     for li in l0:
         n_min = np.ceil(l_min / li)
-        members.update(
-            set(np.around(np.arange(n_min * li, l_max, li), decimals=decimals))
-        )
+        members.update(set(np.around(np.arange(n_min * li, l_max, li), decimals=decimals)))
     return sorted(members)
 
 
-def kspacing_series(
-    atoms: ase.Atoms, l_min: float, l_max: float, decimals: int = 4
-) -> List[float]:
+def kspacing_series(atoms: ase.Atoms, l_min: float, l_max: float, decimals: int = 4) -> List[float]:
     """Find series of KSPACING values with different results."""
     return [np.pi / c for c in cutoff_series(atoms, l_min, l_max, decimals=decimals)]
 
@@ -118,15 +108,10 @@ def kpoints_main(
     vasp: bool,
     realspace: bool,
 ) -> None:
-    atoms = (
-        ase.io.read(filename, format=file_type) if file_type else ase.io.read(filename)
-    )
+    atoms = ase.io.read(filename, format=file_type) if file_type else ase.io.read(filename)
     cutoffs = cutoff_series(atoms, l_min, l_max)
     kspacing = [0.5 / c for c in cutoffs] if not vasp else [np.pi / c for c in cutoffs]
-    samples = [
-        calc_kpt_tuple(atoms, cutoff_length=(cutoff - 1e-4), realspace=realspace)
-        for cutoff in cutoffs
-    ]
+    samples = [calc_kpt_tuple(atoms, cutoff_length=(cutoff - 1e-4), realspace=realspace) for cutoff in cutoffs]
 
     if comma_sep:
 

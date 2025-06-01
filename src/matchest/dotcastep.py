@@ -150,9 +150,7 @@ class DotCastep:
             elif data is True and "Final free" in line:
                 ffree = float(line.split()[-2])
                 yield ScfStats(
-                    data=dict(
-                        eng=eng, engf=engf, enga=enga, timming=timming, final_free=ffree
-                    ),
+                    data=dict(eng=eng, engf=engf, enga=enga, timming=timming, final_free=ffree),
                     tags=None,
                 )
                 eng = []
@@ -170,7 +168,7 @@ class DotCastep:
         k_parallel = 1
         gpatt = r"G-vector\((\d+)-way\)"
         kpatt = r"k-point\((\d+)-way\)"
-        for i, line in enumerate(self.fhandle):
+        for _, line in enumerate(self.fhandle):
             if "Calculation parallelised over" in line:
                 nmpi = int(line.split()[-2])
                 continue

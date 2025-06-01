@@ -159,12 +159,8 @@ def print_vasp_conv(outcar_file: str) -> None:
     converged = ["YES" if fmax < abs(ediffg) else "NO" for fmax in max_forces]
 
     # Print results
-    print(
-        " Step |   E (eV)  |   dE (eV)    |  Fmax (eV/Å) | Smax (Gpa) | Time (s) | Average drift  | Convergence |"
-    )
-    print(
-        "---------------------------------------------------------------------------------------------------------"
-    )
+    print(" Step |   E (eV)  |   dE (eV)    |  Fmax (eV/Å) | Smax (Gpa) | Time (s) | Average drift  | Convergence |")
+    print("---------------------------------------------------------------------------------------------------------")
 
     for i in range(nsteps):
         if i == 0:
