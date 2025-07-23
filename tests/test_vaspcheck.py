@@ -462,6 +462,13 @@ class TestVaspScanner:
         """Test VaspScanner initialization."""
         scanner = VaspScanner(multi_calc_dir)
         assert scanner.directory == Path(multi_calc_dir)
+        assert not scanner.show_progress  # Default should be False
+
+    def test_init_with_progress(self, multi_calc_dir):
+        """Test VaspScanner initialization with progress bar enabled."""
+        scanner = VaspScanner(multi_calc_dir, show_progress=True)
+        assert scanner.directory == Path(multi_calc_dir)
+        assert scanner.show_progress
 
     def test_find_vasp_calculations_recursive(self, multi_calc_dir):
         """Test finding VASP calculations recursively."""
@@ -572,6 +579,46 @@ class TestVaspScanner:
 
         # If no calculations have issues, the report should be shorter
         assert "VASP Input File Analysis Report" in report
+
+    @patch("matchest.cli.vaspcheck.tqdm")
+    @patch.object(VASPInputChecker, "estimate_nkpts")
+    def test_check_calculations_with_progress(self, mock_estimate_nkpts, mock_tqdm, multi_calc_dir):
+        """Test check_calculations with progress bar enabled."""
+        mock_estimate_nkpts.return_value = 10
+
+        # Configure mock tqdm to return the paths as-is
+        mock_tqdm.return_value = mock_tqdm
+        mock_tqdm.__iter__ = lambda x: iter([multi_calc_dir / "calc1", multi_calc_dir / "calc2"])
+
+        scanner = VaspScanner(multi_calc_dir, show_progress=True)
+        vasp_dirs = scanner.find_vasp_calculations(recursive=True)
+        scanner.check_calculations(vasp_dirs)
+
+        # Verify tqdm was called with correct parameters
+        mock_tqdm.assert_called_once()
+        call_args = mock_tqdm.call_args
+        assert call_args[1]["desc"] == "Checking calculations"
+        assert not call_args[1]["disable"]  # show_progress=True means disable=False
+
+    @patch("matchest.cli.vaspcheck.tqdm")
+    @patch.object(VASPInputChecker, "estimate_nkpts")
+    def test_check_calculations_without_progress(self, mock_estimate_nkpts, mock_tqdm, multi_calc_dir):
+        """Test check_calculations with progress bar disabled."""
+        mock_estimate_nkpts.return_value = 10
+
+        # Configure mock tqdm to return the paths as-is
+        mock_tqdm.return_value = mock_tqdm
+        mock_tqdm.__iter__ = lambda x: iter([multi_calc_dir / "calc1", multi_calc_dir / "calc2"])
+
+        scanner = VaspScanner(multi_calc_dir, show_progress=False)
+        vasp_dirs = scanner.find_vasp_calculations(recursive=True)
+        scanner.check_calculations(vasp_dirs)
+
+        # Verify tqdm was called with correct parameters
+        mock_tqdm.assert_called_once()
+        call_args = mock_tqdm.call_args
+        assert call_args[1]["desc"] == "Checking calculations"
+        assert call_args[1]["disable"]  # show_progress=False means disable=True
 
 
 class TestCalculationInfo:

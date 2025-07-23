@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Tuple, Union
 from math import ceil
 
 import click
+from tqdm import tqdm
 from ..utils.kmesh import get_ir_kpoints_and_weights
 
 CHEMICAL_SYMBOLS = [
@@ -799,8 +800,9 @@ class VASPInputChecker:
 class VaspScanner:
     """A scanner for VASP calculations in a directory."""
 
-    def __init__(self, directory: str):
+    def __init__(self, directory: str, show_progress: bool = False):
         self.directory = Path(directory)
+        self.show_progress = show_progress
 
     def find_vasp_calculations(self, recursive=True) -> List[Path]:
         """
@@ -836,21 +838,25 @@ class VaspScanner:
         Scan directory for VASP calculations and check them.
 
         Args:
-            root_dir: Root directory to scan
-            recursive: Whether to scan subdirectories recursively
+            paths: List of paths to check
+            include_critical: Whether to include calculations with critical errors
 
         Returns:
             List of CalculationInfo objects for found calculations
         """
         calculations = []
-        for dirpath in paths:
+
+        # Create progress bar if requested
+        path_iterator = tqdm(paths, desc="Checking calculations", disable=not self.show_progress)
+
+        for dirpath in path_iterator:
             checker = VASPInputChecker(dirpath)
             try:
                 calc_info = checker.check_calculation()
             except CriticalInputError as error:
                 if include_critical:
                     calc_info = CalculationInfo(
-                        path=self.root_dir,
+                        path=dirpath,
                         n_atoms=0,
                         n_kpoints=0,
                         n_bands=0,
@@ -939,13 +945,14 @@ class VaspScanner:
 @click.argument("directory", type=click.Path(exists=True, path_type=Path))
 @click.option("--recursive/--no-recursive", default=True, help="Recursively scan subdirectories")
 @click.option("--output", "-o", type=click.Path(path_type=Path), help="Output report to file")
-def check_vasp_inputs(directory, recursive, output):
+@click.option("--progress/--no-progress", default=True, help="Show progress bar during analysis")
+def check_vasp_inputs(directory, recursive, output, progress):
     """
     Check VASP input files for optimal parallelization and efficiency.
 
     DIRECTORY: Path to directory containing VASP calculations to check.
     """
-    scanner = VaspScanner(directory)
+    scanner = VaspScanner(directory, show_progress=progress)
 
     click.echo(f"Scanning {'recursively' if recursive else 'non-recursively'}: {directory}")
 
