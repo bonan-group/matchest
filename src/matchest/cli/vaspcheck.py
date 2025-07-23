@@ -6,6 +6,7 @@ settings and computational efficiency.
 """
 
 import re
+import subprocess
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
@@ -840,6 +841,75 @@ class VaspScanner:
 
         return vasp_dirs
 
+    def find_vasp_calculations_in_queue(self) -> List[Path]:
+        """
+        Find VASP calculation directories from running and queued SLURM jobs.
+
+        This method uses `squeue` to get working directories of all running and queued jobs
+        for the current user, then checks which of those directories contain VASP calculations.
+        Directories that the user doesn't have permission to read are ignored.
+
+        Returns:
+            List of Paths to directories containing VASP calculations from queued/running jobs
+        """
+        vasp_dirs = []
+
+        try:
+            # Get current user's running and queued jobs
+            result = subprocess.run(
+                ["squeue", "--noheader", "--format=%Z"],  # %Z is working directory
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            # Parse working directories from squeue output
+            work_dirs = []
+            for line in result.stdout.strip().split("\n"):
+                if line.strip():
+                    work_dir = line.strip()
+                    if work_dir and work_dir != "n/a" and work_dir != "(null)":
+                        work_dirs.append(Path(work_dir))
+
+        except subprocess.CalledProcessError as e:
+            if self.show_progress:
+                click.echo(f"Warning: Failed to run squeue command: {e}", err=True)
+            return []
+        except FileNotFoundError:
+            if self.show_progress:
+                click.echo("Warning: squeue command not found. This method requires SLURM.", err=True)
+            return []
+
+        if not work_dirs:
+            if self.show_progress:
+                click.echo("No jobs found in queue for current user.")
+            return []
+
+        def is_vasp_calculation(directory: Path) -> bool:
+            """Check if directory contains VASP input files."""
+            try:
+                required_files = ["INCAR", "POSCAR"]
+                return all((directory / f).exists() for f in required_files)
+            except (PermissionError, OSError):
+                # Skip directories we can't read (belong to other users or inaccessible)
+                return False
+
+        # Create progress bar if requested
+        if self.show_progress:
+            work_dirs = tqdm(work_dirs, desc="Checking job directories")
+
+        for work_dir in work_dirs:
+            try:
+                # Check if the working directory exists and is accessible
+                if work_dir.exists() and work_dir.is_dir():
+                    if is_vasp_calculation(work_dir):
+                        vasp_dirs.append(work_dir)
+            except (PermissionError, OSError):
+                # Skip directories we can't access
+                continue
+
+        return vasp_dirs
+
     def check_calculations(self, paths, include_critical=False) -> List[CalculationInfo]:
         """
         Scan directory for VASP calculations and check them.
@@ -999,23 +1069,41 @@ class VaspScanner:
 
 # CLI interface
 @click.command()
-@click.argument("directory", type=click.Path(exists=True, path_type=Path))
+@click.argument("directory", type=click.Path(exists=True, path_type=Path), required=False)
 @click.option("--recursive/--no-recursive", default=True, help="Recursively scan subdirectories")
 @click.option("--output", "-o", type=click.Path(path_type=Path), help="Output report to file")
 @click.option("--progress/--no-progress", default=True, help="Show progress bar during analysis")
 @click.option("--table/--no-table", default=True, help="Display results in table format")
-def check_vasp_inputs(directory, recursive, output, progress, table):
+@click.option("--queue", is_flag=True, help="Scan VASP calculations in running/queued SLURM jobs instead of directory")
+def check_vasp_inputs(directory, recursive, output, progress, table, queue):
     """
     Check VASP input files for optimal parallelization and efficiency.
 
     DIRECTORY: Path to directory containing VASP calculations to check.
+               Not required when using --queue option.
     """
-    scanner = VaspScanner(directory, show_progress=progress)
+    if queue and directory:
+        click.echo("Warning: --queue option ignores the DIRECTORY argument", err=True)
+    elif not queue and not directory:
+        raise click.ClickException("Either provide a DIRECTORY argument or use --queue option")
 
-    click.echo(f"Scanning {'recursively' if recursive else 'non-recursively'}: {directory}")
+    # For queue mode, we don't need a specific directory, so use current working directory as fallback
+    scanner_dir = directory if directory else Path.cwd()
+    scanner = VaspScanner(scanner_dir, show_progress=progress)
 
-    dirs = scanner.find_vasp_calculations(recursive=recursive)
-    click.echo(f"Found {len(dirs)} VASP calculation directories.")
+    if queue:
+        click.echo("Scanning VASP calculations in running/queued SLURM jobs...")
+        dirs = scanner.find_vasp_calculations_in_queue()
+        click.echo(f"Found {len(dirs)} VASP calculation directories in job queue.")
+    else:
+        click.echo(f"Scanning {'recursively' if recursive else 'non-recursively'}: {directory}")
+        dirs = scanner.find_vasp_calculations(recursive=recursive)
+        click.echo(f"Found {len(dirs)} VASP calculation directories.")
+
+    if not dirs:
+        click.echo("No VASP calculations found.")
+        return
+
     calculations = scanner.check_calculations(dirs)
     click.echo(f"Analysing {len(dirs)} VASP calculation directories.")
     report = scanner.generate_report(calculations, output_file=output, table_format=table)
