@@ -518,6 +518,8 @@ class VASPInputChecker:
         for line in lines:
             if line.startswith(" running on"):
                 out["ntasks"] = int(line.split()[2])
+            elif line.startswith(" running") and "mpi-ranks" in line:
+                out["ntasks"] = int(line.strip().split()[1])
             elif "NKPTS" in line and "NBANDS" in line:
                 # Extract NKPTS and NBANDS from the line
                 tokens = line.split()
@@ -542,7 +544,12 @@ class VASPInputChecker:
         # Iterate files in the current directory
         out = {"ntasks": None, "found": False}
         for file in self.root_dir.iterdir():
-            if not file.is_file() or file.stat().st_size < 1024 * 20:
+            # Ignore folders
+            if not file.is_file():
+                continue
+            # Ignore large or small files
+            file_size = file.stat().st_size
+            if file_size > 1024 * 20 or file_size < 10:
                 continue
             # Potential a submission script (smaller than 20kB)
             try:
@@ -550,7 +557,7 @@ class VASPInputChecker:
             except UnicodeDecodeError:
                 continue
             # Check if the first line starts with #!/bin/bash
-            if not lines[0].startswith("#!/bin/bash"):
+            if not lines or not lines[0].startswith("#!/bin/bash"):
                 continue
             # Check for SLURM directives
             for line in lines:

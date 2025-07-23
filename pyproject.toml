@@ -30,7 +30,8 @@ dependencies = [
   "ase",
   "pymatgen",
   "tqdm",
-  "tabulate"
+  "tabulate",
+  "click"
 ]
 
 [project.urls]
