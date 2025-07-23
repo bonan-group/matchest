@@ -912,7 +912,10 @@ class VaspScanner:
                 report_lines.append(f"  KPAR: {calc.kpar}")
             if calc.npar is not None:
                 report_lines.append(f"  NPAR: {calc.npar}")
-
+            if calc.outcar_info is not None:
+                report_lines.append("  State: launched")
+            else:
+                report_lines.append("  State: not launched")
             if calc.issues:
                 report_lines.append("  Issues:")
                 for issue in calc.issues:
