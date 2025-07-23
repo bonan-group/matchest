@@ -1,8 +1,33 @@
 """
 VASP input file checker module.
 
-This module provides tools to check VASP input files for optimal parallelization
-settings and computational efficiency.
+This module provides comprehensive tools to check VASP input files for optimal
+parallelization settings and computational efficiency. It analyzes INCAR, POSCAR,
+POTCAR, and KPOINTS files to identify potential issues and provide recommendations
+for better performance.
+
+Classes:
+    VASPInputChecker: Main class for checking individual VASP calculations
+    VaspScanner: Scanner for finding and analyzing multiple VASP calculations
+    CalculationInfo: Data class containing calculation analysis results
+
+Exceptions:
+    InputCheckError: Non-critical input file validation errors
+    CriticalInputError: Critical errors that prevent analysis
+
+Example:
+    Basic usage for checking a single calculation:
+
+    >>> checker = VASPInputChecker("/path/to/vasp/calculation")
+    >>> calc_info = checker.check_calculation()
+    >>> print(f"Found {len(calc_info.issues)} issues")
+
+    Scanning multiple calculations:
+
+    >>> scanner = VaspScanner("/path/to/calculations", show_progress=True)
+    >>> dirs = scanner.find_vasp_calculations(recursive=True)
+    >>> calculations = scanner.check_calculations(dirs)
+    >>> report = scanner.generate_report(calculations)
 """
 
 import re
@@ -157,39 +182,84 @@ ATOMIC_NUMBERS = {symbol: Z for Z, symbol in enumerate(CHEMICAL_SYMBOLS)}
 
 
 class InputCheckError(ValueError):
-    """Error indicating problem with the input file"""
+    """
+    Error indicating a non-critical problem with the input file.
+
+    This exception is raised when there are issues with input files that
+    don't prevent the analysis from continuing, such as missing optional
+    files or minor formatting issues.
+    """
 
     pass
 
 
 class CriticalInputError(ValueError):
-    """Critical error when checking inputs"""
+    """
+    Critical error when checking inputs that prevents analysis.
+
+    This exception is raised for serious issues that make it impossible
+    to analyze the calculation, such as missing required files or
+    severely malformed input files.
+    """
+
+    pass
 
 
 @dataclass
 class CalculationInfo:
-    """Information about a VASP calculation."""
+    """
+    Information about a VASP calculation and its analysis results.
+
+    This dataclass stores comprehensive information about a VASP calculation
+    including system properties, parallelization settings, and identified issues.
+
+    Attributes:
+        path: Path to the calculation directory
+        n_atoms: Total number of atoms in the system
+        n_kpoints: Number of k-points in the calculation
+        n_bands: Number of electronic bands
+        n_electrons: Total number of valence electrons
+        ncore: NCORE parallelization parameter (cores per band group)
+        kpar: KPAR parallelization parameter (k-point parallelization)
+        npar: NPAR parallelization parameter (deprecated, use NCORE instead)
+        issues: List of identified issues and warnings
+        ntasks: Total number of MPI tasks/processes
+        is_hybrid_dft: Whether this is a hybrid DFT calculation
+        outcar_info: Additional information extracted from OUTCAR if available
+
+    Properties:
+        computational_cost: Estimated computational cost (n_kpoints * n_bands²)
+    """
 
     path: Path
     n_atoms: int
-    n_kpoints: int
-    n_bands: int
-    n_electrons: int
+    n_kpoints: Optional[int]
+    n_bands: Optional[int]
+    n_electrons: Optional[int]
     ncore: Optional[int] = None
     kpar: Optional[int] = None
     npar: Optional[int] = None
-    issues: List[str] = None
+    issues: Optional[List[str]] = None
     ntasks: Optional[int] = None
     is_hybrid_dft: bool = False
     outcar_info: Optional[Dict[str, Union[int, float]]] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        """Initialize issues list if not provided."""
         if self.issues is None:
             self.issues = []
 
     @property
-    def computational_cost(self) -> float:
-        """Estimate computational cost proportional to n_kpoints * n_bands^2."""
+    def computational_cost(self) -> Optional[float]:
+        """
+        Estimate computational cost proportional to n_kpoints * n_bands².
+
+        This provides a rough estimate of the computational complexity,
+        useful for determining appropriate parallelization strategies.
+
+        Returns:
+            Estimated computational cost, or None if information is insufficient
+        """
         if self.n_kpoints is None or self.n_bands is None:
             return None
         return self.n_kpoints * (self.n_bands**2)
@@ -197,21 +267,46 @@ class CalculationInfo:
 
 class VASPInputChecker:
     """
-    A class to check VASP input files for optimal settings and potential issues.
+    A comprehensive checker for VASP input files and parallelization settings.
 
-    This checker examines INCAR, POSCAR, POTCAR, and KPOINTS files to:
+    This class examines INCAR, POSCAR, POTCAR, and KPOINTS files to:
     1. Parse parallelization settings (NCORE, KPAR, NPAR)
     2. Estimate computational requirements
     3. Validate parallelization settings against calculation size
+    4. Identify potential performance issues and provide recommendations
+
+    The checker analyzes both input files and output files (if available) to
+    provide comprehensive feedback on calculation setup and efficiency.
+
+    Attributes:
+        root_dir: Path to the calculation directory
+        min_cost_threshold: Minimum cost below which parallelization warnings are issued
+        max_cost_threshold: Maximum cost above which efficiency warnings are issued
+        incar_path: Path to INCAR file
+        kpoints_path: Path to KPOINTS file
+        poscar_path: Path to POSCAR file
+        potcar_path: Path to POTCAR file
+
+    Example:
+        >>> checker = VASPInputChecker("/path/to/calculation")
+        >>> calc_info = checker.check_calculation(ntasks=64)
+        >>> if calc_info.issues:
+        ...     for issue in calc_info.issues:
+        ...         print(f"Issue: {issue}")
     """
 
-    def __init__(self, root_dir, min_cost_threshold: float = 1000.0, max_cost_threshold: float = 1e6):
+    def __init__(
+        self, root_dir: Union[str, Path], min_cost_threshold: float = 1000.0, max_cost_threshold: float = 1e6
+    ) -> None:
         """
         Initialize the VASP input checker.
 
         Args:
-            min_cost_threshold: Minimum cost below which parallelization warnings are issued
-            max_cost_threshold: Maximum cost above which efficiency warnings are issued
+            root_dir: Path to the directory containing VASP input files
+            min_cost_threshold: Minimum computational cost below which
+                parallelization warnings are issued
+            max_cost_threshold: Maximum computational cost above which
+                efficiency warnings are issued
         """
         self.root_dir = Path(root_dir)
         self.min_cost_threshold = min_cost_threshold
@@ -223,15 +318,28 @@ class VASPInputChecker:
         self.poscar_path = self.root_dir / "POSCAR"
         self.potcar_path = self.root_dir / "POTCAR"
 
-    def parse_incar(self) -> Dict[str, Union[str, int, float]]:
+    def parse_incar(self) -> Dict[str, Union[str, int, float, bool]]:
         """
-        Parse INCAR file into a dictionary.
+        Parse INCAR file into a dictionary with appropriate type conversion.
 
-        Args:
-            incar_path: Path to INCAR file
+        Reads the INCAR file and converts values to appropriate Python types:
+        - Boolean values (TRUE/FALSE) are converted to bool
+        - Numeric values are converted to int or float
+        - Other values remain as strings
+
+        Comments (lines starting with # or !) are ignored.
 
         Returns:
-            Dictionary of INCAR parameters
+            Dictionary of INCAR parameters with lowercase keys
+
+        Raises:
+            InputCheckError: If INCAR file does not exist
+
+        Example:
+            >>> checker = VASPInputChecker("/path/to/calc")
+            >>> incar = checker.parse_incar()
+            >>> print(incar['ncore'])  # Returns integer value
+            >>> print(incar['lhfcalc'])  # Returns boolean value
         """
         incar_dict = {}
 
@@ -272,13 +380,23 @@ class VASPInputChecker:
 
     def parse_poscar_elements(self) -> Tuple[List[str], List[int]]:
         """
-        Parse POSCAR file to get element types and counts.
+        Parse POSCAR file to extract element types and their counts.
 
-        Args:
-            poscar_path: Path to POSCAR file
+        Reads the element symbols and atom counts from lines 5 and 6 of the POSCAR file.
+        Validates that element names are properly formatted.
 
         Returns:
-            Tuple of (element_types, element_counts)
+            Tuple containing:
+                - List of element symbols (e.g., ['Li', 'Fe', 'P', 'O'])
+                - List of atom counts for each element (e.g., [1, 1, 1, 4])
+
+        Raises:
+            CriticalInputError: If element names are invalid or file is malformed
+
+        Example:
+            >>> elements, counts = checker.parse_poscar_elements()
+            >>> print(f"System has {sum(counts)} atoms")
+            >>> print(f"Elements: {elements}")
         """
         with open(self.poscar_path, "r") as f:
             lines = f.readlines()
@@ -290,20 +408,28 @@ class VASPInputChecker:
         counts = [int(value) for value in lines[6].strip().split()]
         return elems, counts
 
-    def parse_poscar_structure(
-        self,
-    ) -> Tuple[List[List[float]], List[str], List[int], List[List[float]]]:
+    def parse_poscar_structure(self) -> Tuple[List[List[float]], List[str], List[int], List[List[float]]]:
         """
-        Parse the POSCAR to get the lattice vectors and atomic positions
+        Parse the complete POSCAR structure including lattice and atomic positions.
 
-        Args:
-            poscar_path: Path to POSCAR file
+        Extracts comprehensive structural information from the POSCAR file including
+        lattice vectors, element information, and atomic coordinates. Handles both
+        direct/fractional and Cartesian coordinate formats.
+
         Returns:
-            A tuple containing:
-            - lattice_vectors: 3x3 matrix of lattice vectors in Angstroms
-            - element_types: List of element symbols
-            - element_counts: List of atom counts for each element type
-            - atomic_positions: List of atomic positions (fractional or cartesian)
+            Tuple containing:
+                - lattice_vectors: 3x3 matrix of lattice vectors in Angstroms
+                - element_types: List of element symbols
+                - element_counts: List of atom counts for each element type
+                - atomic_positions: List of atomic positions (fractional or Cartesian)
+
+        Raises:
+            ValueError: If POSCAR file is malformed or has insufficient data
+            InputCheckError: If POSCAR file is missing
+
+        Example:
+            >>> lattice, elements, counts, positions = checker.parse_poscar_structure()
+            >>> print(f"Unit cell volume: {det(lattice):.2f} Å³")
         """
         if not self.poscar_path.exists():
             raise InputCheckError(f"POSCAR file not found: {self.poscar_path}")
@@ -430,15 +556,24 @@ class VASPInputChecker:
 
         return lattice_vectors, element_types, element_counts, atomic_positions
 
-    def parse_potcar(self) -> List[Tuple[str, str, float]]:
+    def parse_potcar(self) -> Optional[List[Tuple[str, str, float]]]:
         """
-        Parse POTCAR file to get valence electron information in the correct order.
+        Parse POTCAR file to extract valence electron information.
 
-        Args:
-            potcar_path: Path to POTCAR file
+        Reads the POTCAR file to determine the number of valence electrons
+        for each element type. The order matches the element order in POSCAR.
 
         Returns:
-            List of valence electrons for each element in the same order as elements_order
+            List of tuples for each element containing:
+                - Element symbol (e.g., 'Li')
+                - POTCAR identifier (e.g., 'Li_sv')
+                - Number of valence electrons (e.g., 3.0)
+            Returns None if POTCAR file doesn't exist
+
+        Example:
+            >>> valence_info = checker.parse_potcar()
+            >>> for elem, potcar_id, valence in valence_info:
+            ...     print(f"{elem} ({potcar_id}): {valence} valence electrons")
         """
         valence_list = []
         if not self.potcar_path.exists():
@@ -468,15 +603,42 @@ class VASPInputChecker:
             valence_list.append((header_element, header_symbol, valence))
         return valence_list
 
-    def parse_kpoints(self):
+    def parse_kpoints(
+        self,
+    ) -> Union[Tuple[Tuple[int, int, int], str, Optional[List[int]]], Tuple[bool, List[List[float]], List[float]], int]:
         """
-        Parse KPOINTS file to get the kpoints or mesh size.
+        Parse KPOINTS file to determine k-point sampling scheme.
 
-        Args:
-            kpoints_path: Path to KPOINTS file
+        Supports multiple k-point generation modes:
+        - Gamma-centered or Monkhorst-Pack grids
+        - Explicit k-point lists
+        - Automatic generation
 
         Returns:
-            Total number of k-points
+            For grid-based sampling:
+                Tuple of (mesh_size, mode, shifts) where:
+                - mesh_size: (kx, ky, kz) k-point grid dimensions
+                - mode: 'g' for Gamma-centered, 'm' for Monkhorst-Pack
+                - shifts: List of shift values or None
+
+            For explicit k-points:
+                Tuple of (is_cartesian, coordinates, weights) where:
+                - is_cartesian: True if Cartesian coordinates, False if fractional
+                - coordinates: List of k-point coordinates
+                - weights: List of k-point weights
+
+            For automatic:
+                Returns -1
+
+        Raises:
+            CriticalInputError: If KPOINTS file is missing
+            ValueError: If KPOINTS file is malformed
+
+        Example:
+            >>> kpoints_info = checker.parse_kpoints()
+            >>> if isinstance(kpoints_info[0], tuple):
+            ...     mesh, mode, shifts = kpoints_info
+            ...     print(f"K-point grid: {mesh}")
         """
         if not self.kpoints_path.exists():
             raise CriticalInputError(f"Incomplete calculation inputs: {self.kpoints_path} is missing")
@@ -508,9 +670,30 @@ class VASPInputChecker:
             weights.append(float(tokens[3]))
         return is_cartesian, coords, weights
 
-    def parse_outcar(self):
+    def parse_outcar(self) -> Dict[str, Union[int, str]]:
         """
-        Parse OUTCAR for post-mortem analysis.
+        Parse OUTCAR file for post-calculation analysis.
+
+        Extracts runtime information from a completed or running calculation,
+        including actual parallelization parameters and resource usage.
+
+        Returns:
+            Dictionary containing:
+                - 'vasp_version': VASP version string
+                - 'ntasks': Number of MPI tasks used
+                - 'nkpts': Actual number of k-points
+                - 'nbands': Actual number of bands
+                - 'each_k_on': Number of cores per k-point group
+                - 'num_k_groups': Number of k-point groups
+                - 'each_band_on': Number of cores per band group
+                - 'num_band_groups': Number of band groups
+
+        Note:
+            Only available if OUTCAR file exists and calculation has started.
+
+        Example:
+            >>> outcar_info = checker.parse_outcar()
+            >>> print(f"Calculation used {outcar_info['ntasks']} MPI tasks")
         """
         lines = Path(self.root_dir / "OUTCAR").read_text().splitlines()
         out = {}
@@ -536,11 +719,29 @@ class VASPInputChecker:
                 out["num_band_groups"] = int(tokens[tokens.index("groups") - 1])
         return out
 
-    def parse_submit_script(self):
+    def parse_submit_script(self) -> Dict[str, Union[int, bool]]:
         """
-        Find and parse a submit script (e.g. SLURM for parallelization settings.
-        """
+        Find and parse job submission script for parallelization settings.
 
+        Searches the calculation directory for SLURM submission scripts and
+        extracts resource allocation information.
+
+        Returns:
+            Dictionary containing:
+                - 'ntasks': Total number of tasks requested
+                - 'found': Whether a submission script was found
+                - 'ntasks_per_node': Tasks per node (if specified)
+                - 'nodes': Number of nodes (if specified)
+
+        Note:
+            Currently supports SLURM batch scripts. Looks for files with
+            #!/bin/bash shebang and #SBATCH directives.
+
+        Example:
+            >>> submit_info = checker.parse_submit_script()
+            >>> if submit_info['found']:
+            ...     print(f"Job requested {submit_info['ntasks']} tasks")
+        """
         # Iterate files in the current directory
         out = {"ntasks": None, "found": False}
         for file in self.root_dir.iterdir():
@@ -591,14 +792,28 @@ class VASPInputChecker:
         return out
 
     def get_ir_kpoints_and_weights(
-        self,
-        is_time_reversal: bool = True,
-        symprec: float = 1e-5,
-        symmetry_reduce: bool = True,
-    ):
+        self, is_time_reversal: bool = True, symprec: float = 1e-5, symmetry_reduce: bool = True
+    ) -> Optional[Tuple[List, List]]:
         """
-        Get the irreducible k-points and weights from a POSCAR file.
+        Calculate irreducible k-points and weights using crystal symmetry.
 
+        Uses the crystal structure and symmetry to determine the minimal
+        set of k-points needed for the calculation.
+
+        Args:
+            is_time_reversal: Whether to consider time-reversal symmetry
+            symprec: Symmetry detection precision
+            symmetry_reduce: Whether to reduce k-points using symmetry
+
+        Returns:
+            Tuple of (irreducible_kpoints, weights) or None if automatic generation
+
+        Raises:
+            NotImplementedError: For explicit k-point coordinates (not mesh)
+
+        Example:
+            >>> ir_kpts, weights = checker.get_ir_kpoints_and_weights()
+            >>> print(f"Reduced to {len(ir_kpts)} irreducible k-points")
         """
         lattice_vectors, element_types, element_counts, atomic_positions = self.parse_poscar_structure()
 
@@ -636,19 +851,26 @@ class VASPInputChecker:
         )
         return ir_kpoints_weights
 
-    def estimate_nkpts(self, is_time_reversal: bool = True, symprec: float = 1e-5, symmetry_reduce: bool = True) -> int:
+    def estimate_nkpts(
+        self, is_time_reversal: bool = True, symprec: float = 1e-5, symmetry_reduce: bool = True
+    ) -> Optional[int]:
         """
-        Estimate the number of k-points based on POSCAR and mesh.
+        Estimate the number of k-points based on structure and mesh.
+
+        Calculates the number of irreducible k-points that will be used
+        in the calculation after symmetry reduction.
 
         Args:
-            poscar_path: Path to POSCAR file
-            mesh: K-point mesh size or number of k-points
             is_time_reversal: Whether to consider time-reversal symmetry
-            symprec: Symmetry precision for k-point generation
+            symprec: Symmetry detection precision
             symmetry_reduce: Whether to reduce k-points using symmetry
 
         Returns:
-            Estimated number of k-points
+            Estimated number of k-points, or None if cannot be determined
+
+        Example:
+            >>> n_kpts = checker.estimate_nkpts()
+            >>> print(f"Calculation will use ~{n_kpts} k-points")
         """
         output = self.get_ir_kpoints_and_weights(is_time_reversal, symprec, symmetry_reduce)
         if output is None:
@@ -656,18 +878,31 @@ class VASPInputChecker:
         return len(output[0])
 
     def estimate_bands(
-        self, elements: List[str], counts: List[int], valence_list: List[Tuple[str, str, int]]
-    ) -> Tuple[int, int]:
+        self, elements: List[str], counts: List[int], valence_list: Optional[List[Tuple[str, str, float]]]
+    ) -> Tuple[Optional[int], Optional[int]]:
         """
-        Estimate number of electrons and bands.
+        Estimate number of electrons and bands for the calculation.
+
+        Calculates the total number of valence electrons and estimates
+        the number of electronic bands needed for the calculation.
 
         Args:
-            elements: List of element symbols
+            elements: List of element symbols from POSCAR
             counts: List of atom counts for each element
-            valence_list: List of valence electrons for each element in the same order
+            valence_list: Valence electron information from POTCAR
 
         Returns:
-            Tuple of (n_electrons, n_bands)
+            Tuple of (n_electrons, n_bands) or (None, None) if insufficient data
+
+        Raises:
+            ValueError: If element mismatch between POSCAR and POTCAR
+
+        Note:
+            Band estimation uses a heuristic: max(1.3 * n_electrons/2, n_electrons/2 + 10)
+
+        Example:
+            >>> n_elec, n_bands = checker.estimate_bands(elements, counts, valence_list)
+            >>> print(f"System has {n_elec} electrons, estimating {n_bands} bands")
         """
         n_electrons = 0
         if valence_list is None:
@@ -687,12 +922,25 @@ class VASPInputChecker:
 
         return n_electrons, n_bands
 
-    def check_calculation(self, ntasks=None, return_critical=False) -> CalculationInfo:
+    def check_calculation(self, ntasks: Optional[int] = None, return_critical: bool = False) -> CalculationInfo:
         """
-        Check a single VASP calculation directory.
+        Perform comprehensive analysis of a VASP calculation.
+
+        Analyzes all input files, estimates computational requirements,
+        and identifies potential issues with parallelization settings.
+
+        Args:
+            ntasks: Number of MPI tasks (estimated if not provided)
+            return_critical: Whether to return info even for critical errors
 
         Returns:
-            CalculationInfo object with analysis results
+            CalculationInfo object containing complete analysis results
+
+        Example:
+            >>> calc_info = checker.check_calculation(ntasks=64)
+            >>> print(f"Computational cost: {calc_info.computational_cost:.2e}")
+            >>> for issue in calc_info.issues:
+            ...     print(f"Issue: {issue}")
         """
         # Parse input files
         incar_dict = self.parse_incar()
@@ -753,9 +1001,24 @@ class VASPInputChecker:
 
         return calc_info
 
-    def _check_parallelization_issues(self, calc_info: CalculationInfo):
-        """Check for parallelization-related issues."""
+    def _check_parallelization_issues(self, calc_info: CalculationInfo) -> None:
+        """
+        Check for parallelization-related issues and add to calc_info.issues.
 
+        Analyzes the parallelization settings against the calculation size
+        and identifies potential performance problems:
+        - Missing parallelization for large calculations
+        - Inefficient NCORE/NPAR settings
+        - Poor k-point distribution with KPAR
+        - Conflicting parallelization parameters
+
+        Args:
+            calc_info: CalculationInfo object to analyze and update
+
+        Note:
+            This method modifies calc_info.issues in place by appending
+            any identified problems.
+        """
         if calc_info.computational_cost is None:
             calc_info.issues.append("Could not estimate computational cost, skipping parallelization checks")
             return
@@ -813,18 +1076,59 @@ class VASPInputChecker:
 
 
 class VaspScanner:
-    """A scanner for VASP calculations in a directory."""
+    """
+    A scanner for finding and analyzing multiple VASP calculations.
 
-    def __init__(self, directory: str, show_progress: bool = False):
+    This class provides functionality to:
+    1. Recursively find VASP calculation directories
+    2. Scan running/queued SLURM jobs for VASP calculations
+    3. Batch analyze multiple calculations
+    4. Generate comprehensive reports
+
+    Attributes:
+        directory: Root directory to scan for calculations
+        show_progress: Whether to display progress bars during operations
+
+    Example:
+        >>> scanner = VaspScanner("/path/to/calculations", show_progress=True)
+        >>> dirs = scanner.find_vasp_calculations(recursive=True)
+        >>> calculations = scanner.check_calculations(dirs)
+        >>> report = scanner.generate_report(calculations, table_format=True)
+        >>> print(report)
+    """
+
+    def __init__(self, directory: Union[str, Path], show_progress: bool = False) -> None:
+        """
+        Initialize the VASP scanner.
+
+        Args:
+            directory: Root directory to scan for VASP calculations
+            show_progress: Whether to show progress bars during scanning
+        """
         self.directory = Path(directory)
         self.show_progress = show_progress
 
-    def find_vasp_calculations(self, recursive=True) -> List[Path]:
+    def find_vasp_calculations(self, recursive: bool = True) -> List[Path]:
         """
-        Find all VASP calculation directories in the given directory.
+        Find all VASP calculation directories in the specified directory.
+
+        Searches for directories containing the minimum required VASP input files
+        (INCAR and POSCAR). Can operate recursively or on the top level only.
+
+        Args:
+            recursive: If True, search subdirectories recursively
 
         Returns:
-            List of Paths to directories containing VASP calculations
+            List of Path objects to directories containing VASP calculations
+
+        Note:
+            A directory is considered a VASP calculation if it contains
+            both INCAR and POSCAR files.
+
+        Example:
+            >>> scanner = VaspScanner("/calculations")
+            >>> vasp_dirs = scanner.find_vasp_calculations(recursive=True)
+            >>> print(f"Found {len(vasp_dirs)} VASP calculations")
         """
         vasp_dirs = []
         root_dir = self.directory.resolve()
@@ -850,14 +1154,23 @@ class VaspScanner:
 
     def find_vasp_calculations_in_queue(self) -> List[Path]:
         """
-        Find VASP calculation directories from running and queued SLURM jobs.
+        Find VASP calculations from running and queued SLURM jobs.
 
-        This method uses `squeue` to get working directories of all running and queued jobs
-        for the current user, then checks which of those directories contain VASP calculations.
-        Directories that the user doesn't have permission to read are ignored.
+        Uses the `squeue` command to get working directories of all running and
+        queued jobs for the current user, then checks which directories contain
+        VASP calculations. Inaccessible directories are silently ignored.
 
         Returns:
-            List of Paths to directories containing VASP calculations from queued/running jobs
+            List of Path objects to VASP calculation directories from active jobs
+
+        Note:
+            Requires SLURM workload manager and `squeue` command availability.
+            Only finds jobs belonging to the current user.
+
+        Example:
+            >>> scanner = VaspScanner(".")
+            >>> active_calcs = scanner.find_vasp_calculations_in_queue()
+            >>> print(f"Found {len(active_calcs)} active VASP jobs")
         """
         vasp_dirs = []
 
@@ -917,16 +1230,28 @@ class VaspScanner:
 
         return vasp_dirs
 
-    def check_calculations(self, paths, include_critical=False) -> List[CalculationInfo]:
+    def check_calculations(self, paths: List[Path], include_critical: bool = False) -> List[CalculationInfo]:
         """
-        Scan directory for VASP calculations and check them.
+        Analyze multiple VASP calculations in batch.
+
+        Processes a list of calculation directories and generates
+        CalculationInfo objects for each valid calculation.
 
         Args:
-            paths: List of paths to check
+            paths: List of paths to VASP calculation directories
             include_critical: Whether to include calculations with critical errors
 
         Returns:
-            List of CalculationInfo objects for found calculations
+            List of CalculationInfo objects for analyzed calculations
+
+        Note:
+            Calculations with critical errors are excluded by default unless
+            include_critical=True. Progress is shown if show_progress=True.
+
+        Example:
+            >>> paths = scanner.find_vasp_calculations()
+            >>> calculations = scanner.check_calculations(paths, include_critical=True)
+            >>> problematic = [c for c in calculations if c.issues]
         """
         calculations = []
 
@@ -955,22 +1280,35 @@ class VaspScanner:
 
     def generate_report(
         self,
-        calculations: List[CalculationInfo] = None,
+        calculations: Optional[List[CalculationInfo]] = None,
         output_file: Optional[Path] = None,
-        only_has_issues=True,
-        table_format=False,
+        only_has_issues: bool = True,
+        table_format: bool = False,
     ) -> str:
         """
-        Generate a report of the calculation analysis.
+        Generate a comprehensive analysis report.
+
+        Creates a detailed report of the calculation analysis results with
+        summary statistics and detailed findings for each calculation.
 
         Args:
-            calculations: List of CalculationInfo objects
-            output_file: Optional file to write report to
-            only_has_issues: Only show calculations with issues
-            table_format: Display results in a table format
+            calculations: List of CalculationInfo objects to report on
+            output_file: Optional file path to write the report
+            only_has_issues: If True, only show calculations with identified issues
+            table_format: If True, use tabular format (requires tabulate package)
 
         Returns:
-            Report as a string
+            Report as a formatted string
+
+        Note:
+            Table format provides a more compact overview, while detailed format
+            shows comprehensive information for each calculation.
+
+        Example:
+            >>> report = scanner.generate_report(calculations,
+            ...                                 output_file=Path("report.txt"),
+            ...                                 table_format=True)
+            >>> print("Report generated successfully")
         """
         report_lines = []
         report_lines.append("VASP Input File Analysis Report")
@@ -1077,17 +1415,38 @@ class VaspScanner:
 # CLI interface
 @click.command()
 @click.argument("directory", type=click.Path(exists=True, path_type=Path), required=False)
-@click.option("--recursive/--no-recursive", default=True, help="Recursively scan subdirectories")
-@click.option("--output", "-o", type=click.Path(path_type=Path), help="Output report to file")
+@click.option("--recursive/--no-recursive", default=True, help="Recursively scan subdirectories for VASP calculations")
+@click.option("--output", "-o", type=click.Path(path_type=Path), help="Output report to specified file")
 @click.option("--progress/--no-progress", default=True, help="Show progress bar during analysis")
-@click.option("--table/--no-table", default=True, help="Display results in table format")
+@click.option("--table/--no-table", default=True, help="Display results in table format (requires tabulate)")
 @click.option("--queue", is_flag=True, help="Scan VASP calculations in running/queued SLURM jobs instead of directory")
-def check_vasp_inputs(directory, recursive, output, progress, table, queue):
+def check_vasp_inputs(
+    directory: Optional[Path], recursive: bool, output: Optional[Path], progress: bool, table: bool, queue: bool
+) -> None:
     """
     Check VASP input files for optimal parallelization and efficiency.
 
+    This tool analyzes VASP calculations to identify potential performance issues
+    and provide recommendations for better parallelization settings. It can scan
+    local directories or active SLURM jobs.
+
+    \b
     DIRECTORY: Path to directory containing VASP calculations to check.
                Not required when using --queue option.
+
+    \b
+    Examples:
+        # Check all calculations in current directory recursively
+        vaspcheck .
+
+        # Check specific directory with table output
+        vaspcheck /path/to/calculations --table
+
+        # Check active SLURM jobs
+        vaspcheck --queue
+
+        # Generate report file
+        vaspcheck /calculations --output report.txt
     """
     if queue and directory:
         click.echo("Warning: --queue option ignores the DIRECTORY argument", err=True)
