@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
+from math import ceil
 
 import click
 from ..utils.kmesh import get_ir_kpoints_and_weights
@@ -152,6 +153,10 @@ class InputCheckError(ValueError):
     pass
 
 
+class CriticalInputError(ValueError):
+    """Critical error when checking inputs"""
+
+
 @dataclass
 class CalculationInfo:
     """Information about a VASP calculation."""
@@ -165,6 +170,9 @@ class CalculationInfo:
     kpar: Optional[int] = None
     npar: Optional[int] = None
     issues: List[str] = None
+    ntasks: Optional[int] = None
+    is_hybrid_dft: bool = False
+    outcar_info: Optional[Dict[str, Union[int, float]]] = None
 
     def __post_init__(self):
         if self.issues is None:
@@ -173,6 +181,8 @@ class CalculationInfo:
     @property
     def computational_cost(self) -> float:
         """Estimate computational cost proportional to n_kpoints * n_bands^2."""
+        if self.n_kpoints is None or self.n_bands is None:
+            return None
         return self.n_kpoints * (self.n_bands**2)
 
 
@@ -228,7 +238,7 @@ class VASPInputChecker:
                 if "=" in line:
                     # Split on first = only
                     key, value = line.split("=", 1)
-                    key = key.strip().upper()
+                    key = key.strip().lower()
                     value = value.strip()
 
                     # Remove inline comments
@@ -266,6 +276,8 @@ class VASPInputChecker:
         elems = (
             lines[5].strip().split()
         )  # Read the element names (this line is optional but we enforce it for good practice)
+        if not re.match("^[A-Z]+", elems[0]):
+            raise CriticalInputError(f"Invalid element name in POSCAR: {elems[0]}")
         counts = [int(value) for value in lines[6].strip().split()]
         return elems, counts
 
@@ -420,6 +432,8 @@ class VASPInputChecker:
             List of valence electrons for each element in the same order as elements_order
         """
         valence_list = []
+        if not self.potcar_path.exists():
+            return None
 
         with open(self.potcar_path, "r") as f:
             content = f.read()
@@ -455,6 +469,9 @@ class VASPInputChecker:
         Returns:
             Total number of k-points
         """
+        if not self.kpoints_path.exists():
+            raise CriticalInputError(f"Incomplete calculation inputs: {self.kpoints_path} is missing")
+
         with open(self.kpoints_path, "r") as f:
             lines = f.readlines()
 
@@ -466,7 +483,7 @@ class VASPInputChecker:
 
         if mode.startswith("g") or mode.startswith("m"):  # Gamma or Monkhorst-Pack
             kpoint_line = lines[3].strip().split()
-            shifts = [int(value) for value in lines[4].strip().split()] if len(lines) > 4 else None
+            shifts = [int(round(float(value))) for value in lines[4].strip().split()] if len(lines) > 4 else None
             kx, ky, kz = map(int, kpoint_line[:3])
             return (kx, ky, kz), mode[0].lower(), shifts
         elif mode.startswith("a"):  # Automatic
@@ -481,6 +498,81 @@ class VASPInputChecker:
             coords.append([float(value) for value in tokens[:3]])
             weights.append(float(tokens[3]))
         return is_cartesian, coords, weights
+
+    def parse_outcar(self):
+        """
+        Parse OUTCAR for post-mortem analysis.
+        """
+        lines = Path(self.root_dir / "OUTCAR").read_text().splitlines()
+        out = {}
+        out["vasp_version"] = lines[0].split()[0]
+        for line in lines:
+            if line.startswith(" running on"):
+                out["ntasks"] = int(line.split()[2])
+            elif "NKPTS" in line and "NBANDS" in line:
+                # Extract NKPTS and NBANDS from the line
+                tokens = line.split()
+                out["nkpts"] = int(tokens[tokens.index("NKPTS") + 2])
+                out["nkdim"] = int(tokens[tokens.index("NKDIM") + 2])
+                out["nbands"] = int(tokens[-1])
+            elif line.startswith(" distrk:"):
+                tokens = line.split()
+                out["each_k_on"] = int(tokens[tokens.index("on") + 1])
+                out["num_k_groups"] = int(tokens[tokens.index("groups") - 1])
+            elif line.startswith(" distr:"):
+                tokens = line.split()
+                out["each_band_on"] = int(tokens[tokens.index("NCORE=") + 1])
+                out["num_band_groups"] = int(tokens[tokens.index("groups") - 1])
+        return out
+
+    def parse_submit_script(self):
+        """
+        Find and parse a submit script (e.g. SLURM for parallelization settings.
+        """
+
+        # Iterate files in the current directory
+        out = {"ntasks": None, "found": False}
+        for file in self.root_dir.iterdir():
+            if not file.is_file() or file.stat().st_size < 1024 * 20:
+                continue
+            # Potential a submission script (smaller than 20kB)
+            try:
+                lines = file.read_text().splitlines()
+            except UnicodeDecodeError:
+                continue
+            # Check if the first line starts with #!/bin/bash
+            if not lines[0].startswith("#!/bin/bash"):
+                continue
+            # Check for SLURM directives
+            for line in lines:
+                # Check for --ntasks= or -n
+                match = re.match(r"^#SBATCH\s+--ntasks=(\d+)", line)
+                if not match:
+                    match = re.match(r"^#SBATCH\s+-n +(\d+)", line)
+                if match:
+                    out["ntasks"] = int(match.group(1))
+                    out["found"] = True
+                    break
+                # Check for ntasks-per-node, in this case we need to match both nodes and
+                # ntasks-per-node
+                match = re.match(r"^#SBATCH\s+--ntasks-per-node=(\d+)", line)
+                if match:
+                    out["ntasks_per_node"] = int(match.group(1))
+                    if "nodes" in out:
+                        break
+                # Check for nodes
+                match = re.match(r"^#SBATCH\s+--nodes=(\d+)", line)
+                if not match:
+                    match = re.match(r"^#SBATCH\s+-N +(\d+)", line)
+                if match:
+                    out["nodes"] = int(match.group(1))
+                    if "ntasks_per_node" in out:
+                        break
+        if "nodes" in out and "ntasks_per_node" in out:
+            out["ntasks"] = out["nodes"] * out["ntasks_per_node"]
+            out["found"] = True
+
+        return out
 
     def get_ir_kpoints_and_weights(
         self,
@@ -511,10 +603,10 @@ class VASPInputChecker:
         mode = kpoints_info[1]
         shift = kpoints_info[2]
         if mode == "g":
-            assert shift[0] == 0 or shift is None
+            assert shift is None or shift[0] == 0
             shift = None
         elif mode == "m":
-            assert shift[0] == 0 or shift is None
+            assert shift is None or shift[0] == 0
             shift = [1, 1, 1]
         ir_kpoints_weights = get_ir_kpoints_and_weights(
             lattice_vectors,
@@ -562,6 +654,8 @@ class VASPInputChecker:
             Tuple of (n_electrons, n_bands)
         """
         n_electrons = 0
+        if valence_list is None:
+            return None, None
 
         for i, (element, count) in enumerate(zip(elements, counts)):
             potcar_elem, potcar_symbol, valence = valence_list[i]
@@ -577,7 +671,7 @@ class VASPInputChecker:
 
         return n_electrons, n_bands
 
-    def check_calculation(self) -> CalculationInfo:
+    def check_calculation(self, ntasks=None, return_critical=False) -> CalculationInfo:
         """
         Check a single VASP calculation directory.
 
@@ -588,25 +682,23 @@ class VASPInputChecker:
         incar_dict = self.parse_incar()
         elements, counts = self.parse_poscar_elements()
         valence_list = self.parse_potcar()
-        n_kpoints = self.estimate_nkpts()
-
-        if not elements:
-            return CalculationInfo(
-                path=self.root_dir,
-                n_atoms=0,
-                n_kpoints=n_kpoints if n_kpoints else 0,
-                n_bands=0,
-                n_electrons=0,
-                issues=["Could not read POSCAR file"],
-            )
-
         n_atoms = sum(counts)
+
+        # These are estimations - may be replaced by real values
+        n_kpoints = self.estimate_nkpts()
         n_electrons, n_bands = self.estimate_bands(elements, counts, valence_list)
 
+        if ntasks is None:
+            ntasks = 32  #  Use some typically ntask size
+
         # Extract parallelization settings
-        ncore = incar_dict.get("NCORE")
-        kpar = incar_dict.get("KPAR")
-        npar = incar_dict.get("NPAR")
+        ncore = incar_dict.get("ncore")
+        kpar = incar_dict.get("kpar", 1)
+        npar = incar_dict.get("npar")
+
+        # Default to ncore = 1, npar = ntasks / kpar
+        if npar is None and ncore is None:
+            ncore = 1
 
         calc_info = CalculationInfo(
             path=self.root_dir,
@@ -617,74 +709,129 @@ class VASPInputChecker:
             ncore=ncore,
             kpar=kpar,
             npar=npar,
+            ntasks=ntasks,
+            is_hybrid_dft=incar_dict.get("lhfcalc", False),
         )
+
+        # Do we have post mortem OUTCAR?
+        if (self.root_dir / "OUTCAR").exists():
+            outcar_info = self.parse_outcar()
+            # Actual number of kpoints - more accurate
+            if "nkpts" in outcar_info:
+                calc_info.n_kpoints = outcar_info["nkpts"]
+            # Actual number of bands - more accurate
+            if "nbands" in outcar_info:
+                calc_info.n_bands = outcar_info["nbands"]
+            if "ntasks" in outcar_info:
+                calc_info.ntasks = outcar_info["ntasks"]
+            calc_info.outcar_info = outcar_info
+        # Check for submit script
+        submit_info = self.parse_submit_script()
+
+        if submit_info["found"]:
+            # Replace the ntasks to the actual requested values
+            calc_info.ntasks = submit_info.get("ntasks", calc_info.ntasks)
 
         # Check for issues
         self._check_parallelization_issues(calc_info)
-        self._check_computational_efficiency(calc_info)
 
         return calc_info
 
     def _check_parallelization_issues(self, calc_info: CalculationInfo):
         """Check for parallelization-related issues."""
 
+        if calc_info.computational_cost is None:
+            calc_info.issues.append("Could not estimate computational cost, skipping parallelization checks")
+            return
         # Check if parallelization tags are present for large calculations
         if calc_info.computational_cost > self.min_cost_threshold:
             if calc_info.ncore is None and calc_info.kpar is None and calc_info.npar is None:
                 calc_info.issues.append("Large calculation without parallelization tags (NCORE/KPAR/NPAR)")
 
-        # Check NCORE value
+        if calc_info.kpar > calc_info.ntasks:
+            calc_info.issues.append("KPAR is larger than number of tasks, assuming KPAR is 1")
+            kpar = 1
+        else:
+            kpar = calc_info.kpar
+
+        if calc_info.npar is None:
+            # Note - might not be a integer, but sufficient for our purposes
+            npar = calc_info.ntasks / kpar / calc_info.ncore
+        else:
+            npar = calc_info.npar
+        npar = int(ceil(npar))
+
+        if calc_info.ncore is None and calc_info.npar is None:
+            calc_info.issues.append("Neither NCORE nor NPAR is set this is WRONG for most cases!")
+        # Check NPAR vs number of bands value
         if calc_info.ncore is not None:
-            if calc_info.ncore > calc_info.n_bands:
+            if calc_info.n_bands / npar < 10 and not calc_info.is_hybrid_dft:
                 calc_info.issues.append(
-                    f"NCORE ({calc_info.ncore}) is larger than number of bands ({calc_info.n_bands})"
+                    f"NCORE ({calc_info.ncore}) is too small so a large NPAR {npar} is used. "
+                    f"This results in too few ({calc_info.n_bands / npar:.2f})  bands per band group. "
+                    "For standard DFT calculations, it is recommended to have at least 10 bands per band group."
                 )
-            elif calc_info.ncore < 1:
-                calc_info.issues.append(f"Invalid NCORE value: {calc_info.ncore}")
+            elif calc_info.n_bands / npar < 2 and calc_info.is_hybrid_dft:
+                calc_info.issues.append(
+                    f"NCORE ({calc_info.ncore}) is too small so a large NPAR {npar} is used. "
+                    f"This results in too few ({calc_info.n_bands / npar:.2f})  bands per band group. "
+                    "For hybrid DFT calculations, it is recommended to have at least 2 bands per band group."
+                )
+        if calc_info.npar is not None:
+            calc_info.issues.append(
+                "NPAR is explicitly set, we recommend using NCORE instead for better applicability."
+            )
 
         # Check KPAR value
-        if calc_info.kpar is not None:
-            if calc_info.kpar > calc_info.n_kpoints:
+        if kpar != 1:
+            if calc_info.n_kpoints / kpar < 4 and calc_info.n_kpoints % kpar != 0:
                 calc_info.issues.append(
-                    f"KPAR ({calc_info.kpar}) is larger than number of k-points ({calc_info.n_kpoints})"
+                    f"KPAR ({calc_info.kpar}) is larger which result in too few k-points per kpoint group "
+                    "Unless you are sure the number of kpoints can be divided by KPAR, this will result in"
+                    "reduced parallel efficiency."
                 )
-            elif calc_info.kpar < 1:
-                calc_info.issues.append(f"Invalid KPAR value: {calc_info.kpar}")
 
         # Check for conflicting parallelization settings
         if calc_info.ncore is not None and calc_info.npar is not None:
             calc_info.issues.append("Both NCORE and NPAR are set (NCORE is preferred)")
 
-    def _check_computational_efficiency(self, calc_info: CalculationInfo):
-        """Check for computational efficiency issues."""
-
-        # Warn about very large calculations
-        if calc_info.computational_cost > self.max_cost_threshold:
-            calc_info.issues.append(
-                f"Very large calculation (cost: {calc_info.computational_cost:.2e}). "
-                "Consider reducing k-point density or using hybrid functionals carefully."
-            )
-
-        # Check for very small calculations that might not parallelize well
-        if calc_info.computational_cost < self.min_cost_threshold / 10:
-            calc_info.issues.append("Very small calculation - parallelization may not be beneficial")
-
-        # Check k-point to atom ratio
-        if calc_info.n_atoms > 0:
-            kpoint_per_atom = calc_info.n_kpoints / calc_info.n_atoms
-            if kpoint_per_atom > 10:
-                calc_info.issues.append(
-                    f"High k-point density ({kpoint_per_atom:.1f} k-points/atom). " "Consider reducing k-point mesh."
-                )
-
 
 class VaspScanner:
     """A scanner for VASP calculations in a directory."""
 
-    def __init__(self, directory):
+    def __init__(self, directory: str):
         self.directory = Path(directory)
 
-    def scan_directory(self, recursive: bool = True) -> List[CalculationInfo]:
+    def find_vasp_calculations(self, recursive=True) -> List[Path]:
+        """
+        Find all VASP calculation directories in the given directory.
+
+        Returns:
+            List of Paths to directories containing VASP calculations
+        """
+        vasp_dirs = []
+        root_dir = self.directory.resolve()
+
+        def is_vasp_calculation(directory: Path) -> bool:
+            """Check if directory contains VASP input files."""
+            required_files = ["INCAR", "POSCAR"]
+            return all((directory / f).exists() for f in required_files)
+
+        if recursive:
+            dir_iterator = root_dir.rglob("*")
+        else:
+            dir_iterator = root_dir.iterdir()
+        for item in dir_iterator:
+            if item.is_dir() and is_vasp_calculation(item):
+                vasp_dirs.append(item)
+
+        # Also check the root directory itself
+        if is_vasp_calculation(root_dir):
+            vasp_dirs.append(root_dir)
+
+        return vasp_dirs
+
+    def check_calculations(self, paths, include_critical=False) -> List[CalculationInfo]:
         """
         Scan directory for VASP calculations and check them.
 
@@ -696,35 +843,32 @@ class VaspScanner:
             List of CalculationInfo objects for found calculations
         """
         calculations = []
-        root_dir = self.directory.resolve()
-
-        def is_vasp_calculation(directory: Path) -> bool:
-            """Check if directory contains VASP input files."""
-            required_files = ["INCAR", "POSCAR"]
-            return all((directory / f).exists() for f in required_files)
-
-        if recursive:
-            for dirpath in root_dir.rglob("*"):
-                if dirpath.is_dir() and is_vasp_calculation(dirpath):
-                    checker = VASPInputChecker(dirpath)
-                    calc_info = checker.check_calculation()
+        for dirpath in paths:
+            checker = VASPInputChecker(dirpath)
+            try:
+                calc_info = checker.check_calculation()
+            except CriticalInputError as error:
+                if include_critical:
+                    calc_info = CalculationInfo(
+                        path=self.root_dir,
+                        n_atoms=0,
+                        n_kpoints=0,
+                        n_bands=0,
+                        n_electrons=0,
+                        issues=[f"Critical input error: {error}"],
+                    )
                     calculations.append(calc_info)
-        else:
-            for item in root_dir.iterdir():
-                if item.is_dir() and is_vasp_calculation(item):
-                    checker = VASPInputChecker(item)
-                    calc_info = checker.check_calculation()
-                    calculations.append(calc_info)
-
-        # Also check the root directory itself
-        if is_vasp_calculation(root_dir):
-            checker = VASPInputChecker(root_dir)
-            calc_info = checker.check_calculation()
-            calculations.append(calc_info)
+            else:
+                calculations.append(calc_info)
 
         return calculations
 
-    def generate_report(self, calculations: List[CalculationInfo] = None, output_file: Optional[Path] = None) -> str:
+    def generate_report(
+        self,
+        calculations: List[CalculationInfo] = None,
+        output_file: Optional[Path] = None,
+        only_has_issues=True,
+    ) -> str:
         """
         Generate a report of the calculation analysis.
 
@@ -735,8 +879,6 @@ class VaspScanner:
         Returns:
             Report as a string
         """
-        if calculations is None:
-            calculations = self.scan_directory()
         report_lines = []
         report_lines.append("VASP Input File Analysis Report")
         report_lines.append("=" * 50)
@@ -750,12 +892,19 @@ class VaspScanner:
 
         # Detailed analysis
         for i, calc in enumerate(calculations, 1):
+            if not calc.issues and only_has_issues:
+                continue
+
             report_lines.append(f"Calculation {i}: {calc.path}")
+            report_lines.append(f"  ntasks: {calc.ntasks}")
             report_lines.append(f"  Atoms: {calc.n_atoms}")
             report_lines.append(f"  K-points: {calc.n_kpoints}")
             report_lines.append(f"  Bands: {calc.n_bands}")
             report_lines.append(f"  Electrons: {calc.n_electrons}")
-            report_lines.append(f"  Computational cost: {calc.computational_cost:.2e}")
+            if calc.computational_cost:
+                report_lines.append(f"  Computational cost: {calc.computational_cost:.2e}")
+            else:
+                report_lines.append("  Computational cost: Unknown.")
 
             if calc.ncore is not None:
                 report_lines.append(f"  NCORE: {calc.ncore}")
@@ -787,28 +936,21 @@ class VaspScanner:
 @click.argument("directory", type=click.Path(exists=True, path_type=Path))
 @click.option("--recursive/--no-recursive", default=True, help="Recursively scan subdirectories")
 @click.option("--output", "-o", type=click.Path(path_type=Path), help="Output report to file")
-@click.option(
-    "--min-cost", type=float, default=1000.0, help="Minimum computational cost threshold for parallelization warnings"
-)
-@click.option(
-    "--max-cost", type=float, default=1e6, help="Maximum computational cost threshold for efficiency warnings"
-)
-def check_vasp_inputs(directory, recursive, output, min_cost, max_cost):
+def check_vasp_inputs(directory, recursive, output):
     """
     Check VASP input files for optimal parallelization and efficiency.
 
     DIRECTORY: Path to directory containing VASP calculations to check.
     """
-    checker = VASPInputChecker(min_cost_threshold=min_cost, max_cost_threshold=max_cost)
+    scanner = VaspScanner(directory)
 
     click.echo(f"Scanning {'recursively' if recursive else 'non-recursively'}: {directory}")
-    calculations = checker.scan_directory(directory, recursive=recursive)
 
-    if not calculations:
-        click.echo("No VASP calculations found.")
-        return
-
-    report = checker.generate_report(calculations, output_file=output)
+    dirs = scanner.find_vasp_calculations(recursive=recursive)
+    click.echo(f"Found {len(dirs)} VASP calculation directories.")
+    calculations = scanner.check_calculations(dirs)
+    click.echo(f"Analysing {len(dirs)} VASP calculation directories.")
+    report = scanner.generate_report(calculations, output_file=output)
 
     if output:
         click.echo(f"Report written to: {output}")
