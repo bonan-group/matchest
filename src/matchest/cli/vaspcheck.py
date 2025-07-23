@@ -15,6 +15,13 @@ import click
 from tqdm import tqdm
 from ..utils.kmesh import get_ir_kpoints_and_weights
 
+try:
+    from tabulate import tabulate
+
+    TABULATE_AVAILABLE = True
+except ImportError:
+    TABULATE_AVAILABLE = False
+
 CHEMICAL_SYMBOLS = [
     # 0
     "X",
@@ -874,6 +881,7 @@ class VaspScanner:
         calculations: List[CalculationInfo] = None,
         output_file: Optional[Path] = None,
         only_has_issues=True,
+        table_format=False,
     ) -> str:
         """
         Generate a report of the calculation analysis.
@@ -881,6 +889,8 @@ class VaspScanner:
         Args:
             calculations: List of CalculationInfo objects
             output_file: Optional file to write report to
+            only_has_issues: Only show calculations with issues
+            table_format: Display results in a table format
 
         Returns:
             Report as a string
@@ -896,40 +906,87 @@ class VaspScanner:
         report_lines.append(f"Calculations with issues: {len(problematic)}")
         report_lines.append("")
 
-        # Detailed analysis
-        for i, calc in enumerate(calculations, 1):
-            if not calc.issues and only_has_issues:
-                continue
-
-            report_lines.append(f"Calculation {i}: {calc.path}")
-            report_lines.append(f"  ntasks: {calc.ntasks}")
-            report_lines.append(f"  Atoms: {calc.n_atoms}")
-            report_lines.append(f"  K-points: {calc.n_kpoints}")
-            report_lines.append(f"  Bands: {calc.n_bands}")
-            report_lines.append(f"  Electrons: {calc.n_electrons}")
-            if calc.computational_cost:
-                report_lines.append(f"  Computational cost: {calc.computational_cost:.2e}")
+        if table_format:
+            # Table format output
+            if not TABULATE_AVAILABLE:
+                report_lines.append("Error: tabulate library not available. Install with 'pip install tabulate'")
+                report_lines.append("Falling back to detailed format:")
+                report_lines.append("")
+                table_format = False
             else:
-                report_lines.append("  Computational cost: Unknown.")
+                # Filter calculations if only_has_issues is True
+                filtered_calcs = calculations
+                if only_has_issues:
+                    filtered_calcs = [calc for calc in calculations if calc.issues]
 
-            if calc.ncore is not None:
-                report_lines.append(f"  NCORE: {calc.ncore}")
-            if calc.kpar is not None:
-                report_lines.append(f"  KPAR: {calc.kpar}")
-            if calc.npar is not None:
-                report_lines.append(f"  NPAR: {calc.npar}")
-            if calc.outcar_info is not None:
-                report_lines.append("  State: launched")
-            else:
-                report_lines.append("  State: not launched")
-            if calc.issues:
-                report_lines.append("  Issues:")
-                for issue in calc.issues:
-                    report_lines.append(f"    - {issue}")
-            else:
-                report_lines.append("  No issues found")
+                table_data = []
+                headers = ["Directory", "ntasks", "ncore", "kpar", "npar", "Issues"]
 
-            report_lines.append("")
+                for calc in filtered_calcs:
+                    # Truncate directory path for better display
+                    dir_name = str(calc.path.name) if len(str(calc.path)) > 30 else str(calc.path)
+
+                    # Format issues - take first few issues if many
+                    issues_str = ""
+                    if calc.issues:
+                        if len(calc.issues) == 1:
+                            issues_str = calc.issues[0][:60] + ("..." if len(calc.issues[0]) > 60 else "")
+                        else:
+                            issues_str = f"{len(calc.issues)} issues: {calc.issues[0][:40]}..."
+                    else:
+                        issues_str = "None"
+
+                    table_data.append([
+                        dir_name,
+                        calc.ntasks or "N/A",
+                        calc.ncore or "N/A",
+                        calc.kpar or "N/A",
+                        calc.npar or "N/A",
+                        issues_str,
+                    ])
+
+                if table_data:
+                    report_lines.append(tabulate(table_data, headers=headers, tablefmt="grid"))
+                else:
+                    report_lines.append("No calculations to display.")
+
+                report_lines.append("")
+
+        if not table_format:
+            # Detailed analysis (original format)
+            for i, calc in enumerate(calculations, 1):
+                if not calc.issues and only_has_issues:
+                    continue
+
+                report_lines.append(f"Calculation {i}: {calc.path}")
+                report_lines.append(f"  ntasks: {calc.ntasks}")
+                report_lines.append(f"  Atoms: {calc.n_atoms}")
+                report_lines.append(f"  K-points: {calc.n_kpoints}")
+                report_lines.append(f"  Bands: {calc.n_bands}")
+                report_lines.append(f"  Electrons: {calc.n_electrons}")
+                if calc.computational_cost:
+                    report_lines.append(f"  Computational cost: {calc.computational_cost:.2e}")
+                else:
+                    report_lines.append("  Computational cost: Unknown.")
+
+                if calc.ncore is not None:
+                    report_lines.append(f"  NCORE: {calc.ncore}")
+                if calc.kpar is not None:
+                    report_lines.append(f"  KPAR: {calc.kpar}")
+                if calc.npar is not None:
+                    report_lines.append(f"  NPAR: {calc.npar}")
+                if calc.outcar_info is not None:
+                    report_lines.append("  State: launched")
+                else:
+                    report_lines.append("  State: not launched")
+                if calc.issues:
+                    report_lines.append("  Issues:")
+                    for issue in calc.issues:
+                        report_lines.append(f"    - {issue}")
+                else:
+                    report_lines.append("  No issues found")
+
+                report_lines.append("")
 
         report = "\n".join(report_lines)
 
@@ -946,7 +1003,8 @@ class VaspScanner:
 @click.option("--recursive/--no-recursive", default=True, help="Recursively scan subdirectories")
 @click.option("--output", "-o", type=click.Path(path_type=Path), help="Output report to file")
 @click.option("--progress/--no-progress", default=True, help="Show progress bar during analysis")
-def check_vasp_inputs(directory, recursive, output, progress):
+@click.option("--table/--no-table", default=True, help="Display results in table format")
+def check_vasp_inputs(directory, recursive, output, progress, table):
     """
     Check VASP input files for optimal parallelization and efficiency.
 
@@ -960,7 +1018,7 @@ def check_vasp_inputs(directory, recursive, output, progress):
     click.echo(f"Found {len(dirs)} VASP calculation directories.")
     calculations = scanner.check_calculations(dirs)
     click.echo(f"Analysing {len(dirs)} VASP calculation directories.")
-    report = scanner.generate_report(calculations, output_file=output)
+    report = scanner.generate_report(calculations, output_file=output, table_format=table)
 
     if output:
         click.echo(f"Report written to: {output}")
