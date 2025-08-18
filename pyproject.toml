@@ -41,6 +41,7 @@ Source = "https://github.com/bonan-group/matchest"
 
 [project.scripts]
 mat = "matchest.cli.main:mc"
+matchest = "matchest.cli.main:mc"
 
 [tool.hatch.version]
 path = "src/matchest/__about__.py"
