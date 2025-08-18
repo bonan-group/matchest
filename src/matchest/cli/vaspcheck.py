@@ -33,11 +33,14 @@ Example:
 import re
 import subprocess
 from pathlib import Path
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple, Union
 from math import ceil
 
+from warnings import warn
+
 import click
+import numpy as np
 from tqdm import tqdm
 from ..utils.kmesh import get_ir_kpoints_and_weights
 
@@ -47,6 +50,10 @@ try:
     TABULATE_AVAILABLE = True
 except ImportError:
     TABULATE_AVAILABLE = False
+
+
+LONG_LOOP_THRESHOLD_SECONDS = 1800
+LONG_IONIC_LOOP_THRESHOLD_SECONDS = 3600 * 4
 
 CHEMICAL_SYMBOLS = [
     # 0
@@ -243,6 +250,7 @@ class CalculationInfo:
     ntasks: Optional[int] = None
     is_hybrid_dft: bool = False
     outcar_info: Optional[Dict[str, Union[int, float]]] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Initialize issues list if not provided."""
@@ -687,6 +695,8 @@ class VASPInputChecker:
                 - 'num_k_groups': Number of k-point groups
                 - 'each_band_on': Number of cores per band group
                 - 'num_band_groups': Number of band groups
+                - 'loop': Electronic loop found by LOOP
+                - 'loop+': Ionic loop times found by LOOP+
 
         Note:
             Only available if OUTCAR file exists and calculation has started.
@@ -698,6 +708,8 @@ class VASPInputChecker:
         lines = Path(self.root_dir / "OUTCAR").read_text().splitlines()
         out = {}
         out["vasp_version"] = lines[0].split()[0]
+        out["loop"] = []
+        out["loop+"] = []
         for line in lines:
             if line.startswith(" running on"):
                 out["ntasks"] = int(line.split()[2])
@@ -717,6 +729,11 @@ class VASPInputChecker:
                 tokens = line.split()
                 out["each_band_on"] = int(tokens[tokens.index("NCORE=") + 1])
                 out["num_band_groups"] = int(tokens[tokens.index("groups") - 1])
+            elif "LOOP:" in line:
+                out["loop"].append(float(line.split()[-1]))
+            elif "LOOP+:" in line:
+                out["loop+"].append(float(line.split()[-1]))
+
         return out
 
     def parse_submit_script(self) -> Dict[str, Union[int, bool]]:
@@ -823,13 +840,13 @@ class VASPInputChecker:
             chemical_symbols.extend([name] * count)
 
         kpoints_info = self.parse_kpoints()
+        # If kpoints_info is -1, it means automatic generation
+        if kpoints_info == -1:
+            return None
         if not isinstance(kpoints_info[0], tuple):
             if kpoints_info[0] is False:
                 return kpoints_info[1], kpoints_info[2]
             raise NotImplementedError("Only direct coordinate kpoints are supported for now!")
-        # If kpoints_info is -1, it means automatic generation
-        if kpoints_info == -1:
-            return None
         mesh = kpoints_info[0]
         mode = kpoints_info[1]
         shift = kpoints_info[2]
@@ -850,6 +867,60 @@ class VASPInputChecker:
             symmetry_reduce=symmetry_reduce,
         )
         return ir_kpoints_weights
+
+    def get_kpoints_spacing(self):
+        """
+        Return the current effective kpoints spacing
+
+        :return: Spacing along a b c directions, in $2\pi A^{-1}$
+        """
+        kpoints_info = self.parse_kpoints()
+        if kpoints_info == -1:
+            return None
+        if isinstance(kpoints_info[0], tuple):
+            mesh = np.array(kpoints_info[0])
+        else:
+            return None
+        cell = self.parse_poscar_structure()[0]
+        inv_cell = np.linalg.inv(cell).T
+        rec_abc = np.linalg.norm(inv_cell, axis=1)
+        return rec_abc / mesh
+
+    def _check_abnormal_kpoints_spacing(self, calc_info: CalculationInfo):
+        """Check for unusual kpoints spacings"""
+        spacings = self.get_kpoints_spacing()
+        if spacings is None:
+            return
+        # Check for large deviations in spacing
+        if np.any(spacings > 0.1):
+            calc_info.issues.append(
+                f"Unusually large kpoints spacing {spacings} detected."
+                " This should only be used for insulator/isolated systems!"
+            )
+        if np.any(spacings < 0.03):
+            calc_info.issues.append(
+                f"Unusually small kpoints spacing {spacings} detected."
+                " This should only be used for metal/semi-conductors with dispersive valance band!"
+            )
+
+    def _check_long_loop_time(self, calc_info: CalculationInfo):
+        """Check for very lone LOOP time found in the OUTCAR"""
+        if calc_info.outcar_info is not None:
+            loop = calc_info.outcar_info.get("loop", [])
+            loop_ionic = calc_info.outcar_info.get("loop+", [])
+            if any(value > LONG_LOOP_THRESHOLD_SECONDS for value in loop):
+                calc_info.issues.append(
+                    f"Very long LOOP time {max(loop)} detected."
+                    " You should: 1. optimise your parallelization parameters. 2. request more resources; "
+                    "3. re-think about whether  this calculation is really needed and cost-effective!"
+                )
+            if any(value > LONG_IONIC_LOOP_THRESHOLD_SECONDS for value in loop_ionic):
+                calc_info.issues.append(
+                    f"Very long LOOP+ time {max(loop_ionic)} detected."
+                    " You should: 1. optimise your parallelization parameters. 2. request more resources; "
+                    " 3. check if the number of ionic steps can be achieved in the defined walltime;"
+                    "4. re-think about whether this calculation is really needed and cost-effective!"
+                )
 
     def estimate_nkpts(
         self, is_time_reversal: bool = True, symprec: float = 1e-5, symmetry_reduce: bool = True
@@ -998,6 +1069,10 @@ class VASPInputChecker:
 
         # Check for issues
         self._check_parallelization_issues(calc_info)
+        # Check kpoints spacing
+        self._check_abnormal_kpoints_spacing(calc_info)
+        # Check long LOOP time
+        self._check_long_loop_time(calc_info)
 
         return calc_info
 
@@ -1152,7 +1227,7 @@ class VaspScanner:
 
         return vasp_dirs
 
-    def find_vasp_calculations_in_queue(self) -> List[Path]:
+    def find_vasp_calculations_in_queue(self) -> Tuple[List[str], List[Path]]:
         """
         Find VASP calculations from running and queued SLURM jobs.
 
@@ -1172,24 +1247,24 @@ class VaspScanner:
             >>> active_calcs = scanner.find_vasp_calculations_in_queue()
             >>> print(f"Found {len(active_calcs)} active VASP jobs")
         """
-        vasp_dirs = []
+        vasp_user_dirs = []
 
         try:
             # Get current user's running and queued jobs
             result = subprocess.run(
-                ["squeue", "--noheader", "--format=%Z"],  # %Z is working directory
+                ["squeue", "--noheader", r"--format=%Z|%u|%i"],  # %Z is working directory
                 capture_output=True,
                 text=True,
                 check=True,
             )
 
             # Parse working directories from squeue output
-            work_dirs = []
+            work_dir_info = []
             for line in result.stdout.strip().split("\n"):
                 if line.strip():
-                    work_dir = line.strip()
+                    work_dir, user, jobid = line.strip().split("|")
                     if work_dir and work_dir != "n/a" and work_dir != "(null)":
-                        work_dirs.append(Path(work_dir))
+                        work_dir_info.append([user, jobid, Path(work_dir)])
 
         except subprocess.CalledProcessError as e:
             if self.show_progress:
@@ -1200,7 +1275,7 @@ class VaspScanner:
                 click.echo("Warning: squeue command not found. This method requires SLURM.", err=True)
             return []
 
-        if not work_dirs:
+        if not work_dir_info:
             if self.show_progress:
                 click.echo("No jobs found in queue for current user.")
             return []
@@ -1212,25 +1287,28 @@ class VaspScanner:
                 return all((directory / f).exists() for f in required_files)
             except (PermissionError, OSError):
                 # Skip directories we can't read (belong to other users or inaccessible)
+                warn(f"Skipping inaccessible directory: {directory}", stacklevel=1)
                 return False
 
         # Create progress bar if requested
         if self.show_progress:
-            work_dirs = tqdm(work_dirs, desc="Checking job directories")
+            work_dir_info = tqdm(work_dir_info, desc="Checking job directories")
 
-        for work_dir in work_dirs:
+        for work_dir in work_dir_info:
             try:
                 # Check if the working directory exists and is accessible
-                if work_dir.exists() and work_dir.is_dir():
-                    if is_vasp_calculation(work_dir):
-                        vasp_dirs.append(work_dir)
+                if work_dir[-1].exists() and work_dir[-1].is_dir():
+                    if is_vasp_calculation(work_dir[-1]):
+                        vasp_user_dirs.append(work_dir)
             except (PermissionError, OSError):
                 # Skip directories we can't access
                 continue
+        users, jobids, dirs = zip(*vasp_user_dirs)
+        return users, jobids, dirs
 
-        return vasp_dirs
-
-    def check_calculations(self, paths: List[Path], include_critical: bool = False) -> List[CalculationInfo]:
+    def check_calculations(
+        self, paths: List[Path], dir_metadata: List = None, include_critical: bool = False
+    ) -> List[CalculationInfo]:
         """
         Analyze multiple VASP calculations in batch.
 
@@ -1240,6 +1318,7 @@ class VaspScanner:
         Args:
             paths: List of paths to VASP calculation directories
             include_critical: Whether to include calculations with critical errors
+            dir_info: Information about each dir to be attached
 
         Returns:
             List of CalculationInfo objects for analyzed calculations
@@ -1250,7 +1329,7 @@ class VaspScanner:
 
         Example:
             >>> paths = scanner.find_vasp_calculations()
-            >>> calculations = scanner.check_calculations(paths, include_critical=True)
+            >>> calculations, dir_info = scanner.check_calculations(paths, include_critical=True)
             >>> problematic = [c for c in calculations if c.issues]
         """
         calculations = []
@@ -1258,7 +1337,7 @@ class VaspScanner:
         # Create progress bar if requested
         path_iterator = tqdm(paths, desc="Checking calculations", disable=not self.show_progress)
 
-        for dirpath in path_iterator:
+        for dirpath, metadata in zip(path_iterator, dir_metadata or [{}] * len(paths)):
             checker = VASPInputChecker(dirpath)
             try:
                 calc_info = checker.check_calculation()
@@ -1273,8 +1352,10 @@ class VaspScanner:
                         issues=[f"Critical input error: {error}"],
                     )
                     calculations.append(calc_info)
+                    calc_info.metadata.update(metadata)
             else:
                 calculations.append(calc_info)
+                calc_info.metadata.update(metadata)
 
         return calculations
 
@@ -1335,33 +1416,44 @@ class VaspScanner:
                     filtered_calcs = [calc for calc in calculations if calc.issues]
 
                 table_data = []
+                has_user_data = any("user" in calc.metadata for calc in filtered_calcs)
                 headers = ["Directory", "ntasks", "ncore", "kpar", "npar", "Issues"]
+                if has_user_data:
+                    headers.insert(0, "User")
+                    headers.insert(1, "Job")
 
                 for calc in filtered_calcs:
                     # Truncate directory path for better display
-                    dir_name = str(calc.path.name) if len(str(calc.path)) > 30 else str(calc.path)
+                    dir_name = str(calc.path)
 
                     # Format issues - take first few issues if many
                     issues_str = ""
                     if calc.issues:
-                        if len(calc.issues) == 1:
-                            issues_str = calc.issues[0][:60] + ("..." if len(calc.issues[0]) > 60 else "")
-                        else:
-                            issues_str = f"{len(calc.issues)} issues: {calc.issues[0][:40]}..."
+                        # if len(calc.issues) == 1:
+                        #     issues_str = calc.issues[0][:60] + ("..." if len(calc.issues[0]) > 60 else "")
+                        # else:
+                        #     issues_str = f"{len(calc.issues)} issues: {calc.issues[0][:40]}..."
+                        issues_str = "\n".join(calc.issues)
                     else:
                         issues_str = "None"
-
-                    table_data.append([
+                    line = [
                         dir_name,
                         calc.ntasks or "N/A",
                         calc.ncore or "N/A",
                         calc.kpar or "N/A",
                         calc.npar or "N/A",
                         issues_str,
-                    ])
+                    ]
+                    if has_user_data:
+                        line.insert(0, calc.metadata.get("user", "N/A"))
+                        line.insert(1, calc.metadata.get("slurm_job_id", "N/A"))
+                    table_data.append(line)
 
+                max_widths = [10, 10, 10, 10, 10, 60]
+                if has_user_data:
+                    max_widths = [5, 5] + max_widths
                 if table_data:
-                    report_lines.append(tabulate(table_data, headers=headers, tablefmt="grid"))
+                    report_lines.append(tabulate(table_data, headers=headers, maxcolwidths=max_widths, tablefmt="grid"))
                 else:
                     report_lines.append("No calculations to display.")
 
@@ -1456,10 +1548,12 @@ def check_vasp_inputs(
     # For queue mode, we don't need a specific directory, so use current working directory as fallback
     scanner_dir = directory if directory else Path.cwd()
     scanner = VaspScanner(scanner_dir, show_progress=progress)
+    dir_metadata = None
 
     if queue:
         click.echo("Scanning VASP calculations in running/queued SLURM jobs...")
-        dirs = scanner.find_vasp_calculations_in_queue()
+        users, jobids, dirs = scanner.find_vasp_calculations_in_queue()
+        dir_metadata = [{"user": user, "slurm_job_id": jobid} for user, jobid in zip(users, jobids)]
         click.echo(f"Found {len(dirs)} VASP calculation directories in job queue.")
     else:
         click.echo(f"Scanning {'recursively' if recursive else 'non-recursively'}: {directory}")
@@ -1470,7 +1564,8 @@ def check_vasp_inputs(
         click.echo("No VASP calculations found.")
         return
 
-    calculations = scanner.check_calculations(dirs)
+    calculations = scanner.check_calculations(dirs, dir_metadata)
+
     click.echo(f"Analysing {len(dirs)} VASP calculation directories.")
     report = scanner.generate_report(calculations, output_file=output, table_format=table)
 
@@ -1478,6 +1573,49 @@ def check_vasp_inputs(
         click.echo(f"Report written to: {output}")
     else:
         click.echo(report)
+
+
+def wrap_text(text: str, max_width: int = 50, max_lines: int = 5) -> str:
+    """
+    Automatically wrap long text with line breaks for table display.
+
+    Args:
+        text: Text to wrap
+        max_width: Maximum characters per line
+        max_lines: Maximum number of lines to display
+
+    Returns:
+        Text with line breaks inserted, truncated if too many lines
+    """
+    if len(text) <= max_width:
+        return text
+
+    words = text.split()
+    lines = []
+    current_line = ""
+
+    for word in words:
+        # If adding this word would exceed max_width
+        if len(current_line + " " + word) > max_width:
+            if current_line:  # Save current line if it has content
+                lines.append(current_line)
+                current_line = word
+            else:  # Single word is too long, break it
+                lines.append(word[: max_width - 3] + "...")
+                current_line = ""
+        else:
+            current_line = current_line + " " + word if current_line else word
+
+    # Add the last line if it has content
+    if current_line:
+        lines.append(current_line)
+
+    # Limit to max_lines
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        lines[-1] = lines[-1][: max_width - 3] + "..."
+
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
