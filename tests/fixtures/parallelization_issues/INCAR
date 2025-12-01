@@ -1,0 +1,15 @@
+# Calculation with parallelization issues
+SYSTEM = Bad parallelization example
+ISTART = 0
+ICHARG = 2
+ENCUT = 520
+ISMEAR = 0
+SIGMA = 0.05
+EDIFF = 1E-6
+NSW = 0
+IBRION = -1
+PREC = Accurate
+LREAL = False
+NCORE = 100  # Too large
+KPAR = 50    # Too large
+NPAR = 8     # Conflicts with NCORE

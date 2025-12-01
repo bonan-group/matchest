@@ -2,6 +2,9 @@ from pathlib import Path
 
 import click
 
+# Import the new VASP checker command
+from .vaspcheck import check_vasp_inputs
+
 
 @click.group("mc")
 def mc():
@@ -330,3 +333,7 @@ def cmd_charge_neutral(charges, species, nmax):
             forms.add(Composition("".join([f"{sym}{num}" for sym, num in zip(species, seq)])).reduced_formula)
     for item in forms:
         click.echo(item)
+
+
+# Add the VASP checker command to the main CLI group
+mc.add_command(check_vasp_inputs, name="vasp-check")

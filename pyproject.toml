@@ -28,7 +28,10 @@ classifiers = [
 dependencies = [
   "spglib",
   "ase",
-  "pymatgen"
+  "pymatgen",
+  "tqdm",
+  "tabulate",
+  "click"
 ]
 
 [project.optional-dependencies]
@@ -48,7 +51,8 @@ Issues = "https://github.com/bonan-group/matchest/issues"
 Source = "https://github.com/bonan-group/matchest"
 
 [project.scripts]
-matc = "matchest.cli.main:mc"
+mat = "matchest.cli.main:mc"
+matchest = "matchest.cli.main:mc"
 
 [tool.hatch.version]
 path = "src/matchest/__about__.py"
