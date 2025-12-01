@@ -7,9 +7,9 @@ import io
 import ase
 import numpy as np
 from aiida import orm
-from aiida.engine.processes import calcfunction
 from aiida_vasp.parsers.content_parsers.vasprun import VasprunParser
-from ase.build import make_supercell, sort
+from ase.calculators.singlepoint import SinglePointCalculator
+from ase.units import GPa
 
 
 def split_set(data, a, b, shuffle=True):
@@ -27,17 +27,49 @@ def split_set(data, a, b, shuffle=True):
     return [data[:ia], data[ia:ib], data[ib:]]
 
 
-def compose_atoms(calcnode) -> ase.Atoms:
+def compose_atoms(calcnode: orm.ProcessNode) -> ase.Atoms:
+    """Compose an Atoms object with a calculation node"""
+
+    if "vasp" in calcnode.process_label.lower():
+        atoms = _compose_atoms_vasp(calcnode)
+    if "abacus" in calcnode.process_label.lower():
+        atoms = _compose_atoms_abacus(calcnode)
+    atoms.info["aiida_uuid"] = calcnode.uuid
+    atoms.info["aiida_label"] = calcnode.label
+    return atoms
+
+
+def _compose_atoms_abacus(node) -> ase.Atoms:
+    misc = node.outputs.misc
+    if "relax" in node.outputs:
+        structure = node.outputs.structure
+    else:
+        structure = node.inputs.abacus.structure
+    atoms = structure.get_ase()
+    eng = misc["total_energy"]
+    forces = np.array(misc["final_forces"])
+    # Convert to eV / A^3, aiida-abacus uses GPa as the unit
+    if "final_stress" in misc:
+        stress = (np.array(misc["final_stress"]) * 0.1 * GPa * -1).tolist()
+    else:
+        stress = (np.array(misc["all_stress"][-1]) * 0.1 * GPa * -1).tolist()
+
+    atoms = structure.get_ase()
+    sp = SinglePointCalculator(atoms, energy=eng, forces=forces, stress=stress)
+    atoms.calc = sp
+
+    return atoms
+
+
+def _compose_atoms_vasp(calcnode) -> ase.Atoms:
     """Compose an Atoms object with a calculation node, parsing from the retrieved files"""
-    from ase.calculators.singlepoint import SinglePointCalculator
-    from ase.units import GPa
 
     links = [x.link_label for x in calcnode.base.links.get_outgoing().all()]
     misc = calcnode.outputs.misc.get_dict()
     if "force" in links and "stress" in links and "energy_free" in misc["total_energies"]:
         eng = misc["total_energies"]["energy_free"]
         forces = calcnode.outputs.forces.get_array("final")
-        stress = calcnode.outputs.stress.get_array("final") * (GPa / 10)
+        stress = -calcnode.outputs.stress.get_array("final") * (GPa / 10)
     elif (
         "forces" in misc and "stress" in misc and "energy_free" in misc["total_energies"]
     ):  # Forces and stress has been parsed and made avaliable
@@ -69,31 +101,23 @@ def compose_atoms(calcnode) -> ase.Atoms:
     atoms = calcnode.inputs.structure.get_ase()
     sp = SinglePointCalculator(atoms, energy=eng, forces=forces, stress=stress)
     atoms.calc = sp
-    atoms.info["uuid"] = calcnode.uuid
-    atoms.info["label"] = calcnode.label
     return atoms
 
 
-def compose_atoms_mace(calcnode):
+def compose_atoms_mace(
+    calcnode, energy_key="REF_energy", forces_key="REF_forces", stress_key="REF_stress"
+) -> ase.Atoms:
     """
     Compose a atoms which can be used as training data point for MACE
     The energy, forces and stress are saved as "REF_energy", "REF_forces", "REF_stress"
     """
     atoms = compose_atoms(calcnode)
-    atoms.set_array("REF_forces", atoms.get_forces())
-    atoms.info("REF_energy", atoms.get_potential_energy())
-    atoms.info("REF_stress", atoms.get_stress(voigt=False))
+    atoms.set_array(forces_key, atoms.get_forces())
+    atoms.info[energy_key] = atoms.get_potential_energy()
+    atoms.info[stress_key] = atoms.get_stress(voigt=False)
     # Clear other data
     atoms.info.pop("energy", None)
     atoms.info.pop("stress", None)
     atoms.arrays.pop("forces", None)
     atoms.calc = None
     return atoms
-
-
-@calcfunction
-def get_supercell(node, supercell):
-    """Short-cut function to generate super cell and record the provenance"""
-    atoms = node.get_ase()
-    output = sort(make_supercell(atoms, supercell.get_list()))
-    return orm.StructureData(ase=output)

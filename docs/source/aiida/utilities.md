@@ -56,7 +56,7 @@ VASP-specific helper functions.
 - `parse_functional()` - Determine exchange-correlation functional
 - `apply_hubbard_u()` - Apply DFT+U corrections
 
-## MACE Utilities (`maceutils.py`)
+## Atomic Simulation Environment Utilities (`aseutils.py`)
 
 Integration with MACE machine learning potentials for pre-relaxation and high-throughput screening.
 

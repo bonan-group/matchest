@@ -206,12 +206,15 @@ def view_res_ovito(files, sort):
 @mc.command("trim-vasprun")
 @click.argument("input-file", type=click.Path(exists=True))
 @click.argument("tag-to-remove", type=str)
-def trim_tags(input_file, tag_to_remove):
+@click.option("-o", "--output", type=click.Path(), help="Output file path (default: INPUT-FILE.trimmed)")
+@click.option("-i", "--in-place", is_flag=True, help="Overwrite input file (WARNING: destructive)")
+def trim_tags(input_file, tag_to_remove, output, in_place):
     """
-    Reduce the size of vasprun.xml file by removing that under a tag
+    Reduce the size of vasprun.xml file by removing content under a tag
 
     The two commonly used tags are 'projected' and 'partial'.
-    This tool may DESTROY your data, use with caution!
+
+    By default, saves to a new file (INPUT-FILE.trimmed). Use -i to overwrite the original file.
 
     Limitations:
 
@@ -221,11 +224,25 @@ def trim_tags(input_file, tag_to_remove):
     import os
     import shutil
 
+    # Determine output file
+    if in_place:
+        if output:
+            click.echo("Warning: --output is ignored when using --in-place")
+        output_file = input_file + ".tmp"
+        final_output = input_file
+    else:
+        if output is None:
+            output_file = input_file + ".trimmed"
+        else:
+            output_file = output
+        final_output = output_file
+
     tag_start = f"<{tag_to_remove}>"
     tag_end = f"</{tag_to_remove}>"
     trimmed = False
+
     with open(input_file) as fhi:
-        with open(input_file + ".tmp", "w") as fho:
+        with open(output_file if not in_place else input_file + ".tmp", "w") as fho:
             in_section = False
             for line in fhi:
                 if tag_start in line:
@@ -240,14 +257,24 @@ def trim_tags(input_file, tag_to_remove):
 
     if trimmed is True:
         if in_section is False:
-            click.echo(f"Trimmed tag {tag_to_remove}")
-            shutil.move(input_file + ".tmp", input_file)
+            click.echo(f"Trimmed tag '{tag_to_remove}'")
+            if in_place:
+                shutil.move(input_file + ".tmp", input_file)
+                click.echo(f"Overwritten: {input_file}")
+            else:
+                click.echo(f"Saved to: {final_output}")
         else:
-            click.echo(f"Did not find the end of the tag {tag_to_remove} - aborting")
-            os.remove(input_file + ".tmp")
+            click.echo(f"Error: Did not find the end of tag '{tag_to_remove}' - aborting")
+            if in_place:
+                os.remove(input_file + ".tmp")
+            else:
+                os.remove(output_file)
     else:
-        click.echo(f"Tag {tag_to_remove} is not found")
-        os.remove(input_file + ".tmp")
+        click.echo(f"Tag '{tag_to_remove}' not found")
+        if in_place:
+            os.remove(input_file + ".tmp")
+        else:
+            os.remove(output_file)
 
 
 @mc.command("castep-scf-info", help="Print number of SCF steps per iteration")
