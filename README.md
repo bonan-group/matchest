@@ -26,7 +26,7 @@ Reusable modules for materials structure manipulation and analysis using ASE, py
 
 ## Documentation
 
-Full documentation is available at [matchest.readthedocs.io](https://matchest.readthedocs.io) (or will be once set up on ReadTheDocs).
+Full documentation is available at [matchest.readthedocs.io](https://matchest.readthedocs.io).
 
 -----
 

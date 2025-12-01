@@ -1,6 +1,16 @@
 # matchest Documentation
 
-**matchest** is a Python package providing scripts and tools for computational materials science.
+**matchest** is a Python package providing scripts and tools for computational materials science, developed and maintained by the Bonan research group.
+
+:::{admonition} Disclaimer
+:class: warning
+
+This package contains common code shared within our research group. While we strive for quality, the code is provided as-is without guarantees of correctness or completeness.
+
+**Use at your own discretion and always validate results independently.**
+
+Feedback, bug reports, and contributions are highly encouraged!
+:::
 
 ## Features
 
