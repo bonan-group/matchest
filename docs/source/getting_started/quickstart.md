@@ -50,7 +50,7 @@ matchest vasp-check /calculations --recursive
 matchest vasp-check --queue
 
 # Generate report file
-matchest vasp-check /calculations --output report.txt --table
+matchest vasp-check ./my-calc --output report.txt --table
 ```
 
 ### Analyze VASP Convergence

@@ -31,15 +31,15 @@ builder.relax.structure = orm.StructureData(...)
 builder.relax.vasp.code = orm.load_code('vasp@localhost')
 builder.relax.vasp.parameters = orm.Dict(dict={
     'incar': {
-        'ENCUT': 520,
-        'ISMEAR': 0,
-        'SIGMA': 0.05,
-        'EDIFF': 1e-6,
-        'PREC': 'Accurate',
+        'encut': 520,
+        'ismear': 0,
+        'sigma': 0.05,
+        'ediff': 1e-6,
+        'prec': 'Accurate',
     }
 })
 builder.relax.vasp.kpoints = orm.KpointsData(...)
-builder.relax.vasp.potential_family = orm.Str('PBE')
+builder.relax.vasp.potential_family = 'PBE.54'
 builder.relax.vasp.potential_mapping = orm.Dict(...)
 builder.relax.vasp.options = orm.Dict(dict={
     'resources': {'num_machines': 1, 'num_mpiprocs_per_machine': 16},

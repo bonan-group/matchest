@@ -36,7 +36,7 @@ inputs = {
 }
 
 # Create and submit workgraph
-wg = phono3py_workflow(**inputs)
+wg = phono3py_workflow.build(**inputs)
 wg.submit()
 ```
 
