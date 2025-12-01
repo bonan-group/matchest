@@ -88,7 +88,7 @@ class SimpleVacancyWorkChain(WorkChain):
         if self.ctx.bulk_relax_workchain.is_finished_ok:
             self.ctx.relaxed_bulk = self.ctx.bulk_relax_workchain.outputs.relax.structure
             return
-        return self.exit_codes.ERROR_BULK_RELAXATION_FAILED
+        return self.exit_codes.ERROR_BULK_RELAX_FAILED
 
     def run_vac(self):
         """Run vacancy structure calculations"""

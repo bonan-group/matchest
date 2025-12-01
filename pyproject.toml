@@ -31,6 +31,17 @@ dependencies = [
   "pymatgen"
 ]
 
+[project.optional-dependencies]
+aiida = [
+  "aiida-core>=2.0,<3",
+  "aiida-vasp",
+  "numpy",
+  "aiida-workgraph"
+]
+
+[project.entry-points."aiida.workflows"]
+"matchest.vasp.elastic" = "matchest.aiida_utils.workflows.elastic:VaspElasticWorkChain"
+
 [project.urls]
 Documentation = "https://github.com/bonan-group/matchest#readme"
 Issues = "https://github.com/bonan-group/matchest/issues"
