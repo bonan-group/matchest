@@ -34,6 +34,32 @@ dependencies = [
   "click"
 ]
 
+[project.optional-dependencies]
+aiida = [
+  "aiida-core>=2.0,<3",
+  "aiida-vasp",
+  "numpy",
+  "aiida-workgraph"
+]
+docs = [
+  "sphinx>=7.0",
+  "myst-parser>=2.0",
+  "pydata-sphinx-theme>=0.15",
+  "sphinx-click>=5.0",
+  "sphinx-copybutton>=0.5",
+  "sphinx-design>=0.5",
+  "aiida-core>=2.0,<3",
+  "aiida-vasp",
+  "numpy",
+  "aiida-workgraph",
+]
+pre-commit = [
+  "pre-commit>=3.0",
+]
+
+[project.entry-points."aiida.workflows"]
+"matchest.vasp.elastic" = "matchest.aiida_utils.workflows.elastic:VaspElasticWorkChain"
+
 [project.urls]
 Documentation = "https://github.com/bonan-group/matchest#readme"
 Issues = "https://github.com/bonan-group/matchest/issues"

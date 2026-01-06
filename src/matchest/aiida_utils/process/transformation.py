@@ -83,9 +83,9 @@ def magnetic_structure_decorate(structure, magmom):
     )
 
     magmom = magmom.get_list()
-    assert len(magmom) == len(
-        structure.sites
-    ), f"Mismatch between the magmom ({len(magmom)}) and the nubmer of sites ({len(structure.sites)})."
+    assert len(magmom) == len(structure.sites), (
+        f"Mismatch between the magmom ({len(magmom)}) and the nubmer of sites ({len(structure.sites)})."
+    )
     old_species = [structure.get_kind(site.kind_name).symbol for site in structure.sites]
     new_species, magmom_mapping = create_additional_species(old_species, magmom)
     new_structure = StructureData()
